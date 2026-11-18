@@ -1,0 +1,59 @@
+import { CreateSolicitudDto } from '../../application/dtos/create-solicitud.dto';
+import { AsignarSoporteDto } from '../../application/dtos/asignar-soporte.dto';
+import { ReasignarSoporteDto } from '../../application/dtos/reasignar-soporte.dto';
+import { FinalizarSoporteDto } from '../../application/dtos/finalizar-soporte.dto';
+import { BandejaSoporteDto } from '../../application/dtos/bandeja-soporte.dto';
+
+
+export abstract class SoporteRepositoryPort {
+  abstract crearSolicitudTransaccional(idUsuario: number, dto: CreateSolicitudDto): Promise<any>;
+
+  abstract asignarSoporteTransaccional(idOperador: number, dto: AsignarSoporteDto): Promise<any>;
+
+
+  abstract reasignarSoporteTransaccional(
+    idAsignacion: number,
+    idDeSoporte: number,
+    dto: ReasignarSoporteDto
+  ): Promise<any>;
+
+
+
+  abstract finalizarSoporteTransaccional(
+    idAsignacion: number,
+    idSoporte: number,
+    dto: FinalizarSoporteDto
+  ): Promise<any>;
+
+  abstract obtenerMisSolicitudesUsuario(idUsuario: number, estadoFiltro?: string): Promise<any[]>;
+
+  abstract obtenerBandejaOperador(estadoFiltro?: string): Promise<any[]>;
+
+  abstract obtenerMisTareasTecnico(idSoporte: number, estadoFiltro?: string): Promise<any[]>;
+
+  abstract resolicitarSoporte(idSolicitud: number, idUsuario: number, observacion?: string): Promise<any>;
+
+  abstract obtenerBandejaAdministrador(estadoFiltro?: string): Promise<any[]>;
+
+  abstract obtenerBandejaAdministrador(estadoFiltro?: string): Promise<any[]>;
+
+  // Añade esto junto a las otras funciones que ya tienes
+  abstract obtenerItemsDeSolicitud(idSolicitud: number): Promise<any[]>;
+
+  abstract agregarItemASolicitud(idSolicitud: number, idTipoSoporte: number, descripcion: string): Promise<any>;
+
+  abstract obtenerTecnicosDisponibles(): Promise<any[]>;
+
+  abstract ponerEnProcesoSoporte(idSolicitud: number, idSoporte: number): Promise<any>;
+
+  abstract reasignarPorOperador(idSolicitud: number, idNuevoTecnico: number, justificacion: string, prioridad?: string): Promise<any>;
+
+  // GESTIÓN DE ROLES (ADMINISTRADOR)
+  abstract esUsuarioAdministrador(idUsuario: number): Promise<boolean>;
+
+  abstract obtenerUsuariosConRoles(): Promise<any[]>;
+
+  abstract asignarRolUsuario(idUsuario: number, rolSoporte: string): Promise<any>;
+
+  abstract quitarRolUsuario(idUsuario: number, rolSoporte?: string): Promise<any>;
+}

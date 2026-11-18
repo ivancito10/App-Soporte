@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Soporte SSU La Paz",
+    "slug": "sigho-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/ssu-icon-square.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/ssu-icon-square.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "org.ssulapaz.sighoapp"
+    },
+    "android": {
+      "package": "org.ssulapaz.sighoapp",
+      "adaptiveIcon": {
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/ssu-icon-square.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/ssu-icon-square.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "./withCleartextTraffic.js"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "1b6509de-d497-4f7d-9abd-75a8521fe79e"
+      }
+    }
+  }
+}
