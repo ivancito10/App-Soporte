@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { guardarItem, obtenerItem } from '../../../core/utils/storage';
+import { AppIcon, NombreIcono } from '../../../core/components/AppIcon';
 import { useCrearSolicitud } from '../hooks/useCrearSolicitud';
 import { CrearSolicitudPayload } from '../types/soporte.types';
 
@@ -25,11 +26,11 @@ interface UbicacionGuardada {
 
 const STORAGE_KEY_UBICACIONES = 'soporte_ubicaciones_guardadas';
 
-// Opciones visuales amigables para el usuario
-const TIPOS_SOPORTE = [
-    { id: 1, icono: '💻', titulo: 'Equipos físicos', desc: 'Problemas con computadoras, impresoras, teclados, etc.' },
-    { id: 2, icono: '⚙️', titulo: 'Sistema SIGHO', desc: 'Errores en módulos, accesos o fallos del software.' },
-    { id: 3, icono: '🌐', titulo: 'Redes e Internet', desc: 'Sin conexión, red lenta o problemas de Wi-Fi.' }
+// Opciones visuales amigables con iconos vectoriales (sin emojis)
+const TIPOS_SOPORTE: Array<{ id: number; icono: NombreIcono; titulo: string; desc: string }> = [
+    { id: 1, icono: 'laptop', titulo: 'Equipos físicos', desc: 'Problemas con computadoras, impresoras, teclados, etc.' },
+    { id: 2, icono: 'gear', titulo: 'Sistema SIGHO', desc: 'Errores en módulos, accesos o fallos del software.' },
+    { id: 3, icono: 'globe', titulo: 'Redes e Internet', desc: 'Sin conexión, red lenta o problemas de Wi-Fi.' }
 ];
 
 export const CrearSolicitudScreen = () => {
@@ -162,9 +163,12 @@ export const CrearSolicitudScreen = () => {
                 {/* OPCIONES DE UBICACIONES GUARDADAS PREVIAMENTE */}
                 {ubicacionesGuardadas.length > 0 && (
                     <View style={styles.savedLocationsBox}>
-                        <Text style={styles.savedLocationsTitle}>
-                            📍 Tu ubicación guardada (toca para rellenar):
-                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                            <AppIcon name="pin" size={14} color="#2a5298" />
+                            <Text style={[styles.savedLocationsTitle, { marginBottom: 0, marginLeft: 5 }]}>
+                                Tu ubicación guardada (toca para rellenar):
+                            </Text>
+                        </View>
                         {ubicacionesGuardadas.map((u, idx) => {
                             const esSeleccionada =
                                 piso === u.piso &&
@@ -187,17 +191,22 @@ export const CrearSolicitudScreen = () => {
                                     ]}
                                 >
                                     <TouchableOpacity
-                                        style={{ flex: 1, paddingVertical: 8, paddingHorizontal: 10 }}
+                                        style={{ flex: 1, paddingVertical: 8, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center' }}
                                         onPress={() => seleccionarUbicacionGuardada(u)}
                                         disabled={isLoading}
                                     >
+                                        <AppIcon
+                                            name={esSeleccionada ? 'check' : 'pin'}
+                                            size={13}
+                                            color={esSeleccionada ? '#2a5298' : '#555'}
+                                        />
                                         <Text
                                             style={[
                                                 styles.savedChipText,
+                                                { marginLeft: 6 },
                                                 esSeleccionada && styles.savedChipTextActive,
                                             ]}
                                         >
-                                            {esSeleccionada ? '✓ ' : '📍 '}
                                             {resumen}
                                         </Text>
                                     </TouchableOpacity>
@@ -260,7 +269,9 @@ export const CrearSolicitudScreen = () => {
                             onPress={() => setTipoSoporte(tipo.id)}
                             disabled={isLoading}
                         >
-                            <Text style={styles.optionIcon}>{tipo.icono}</Text>
+                            <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: tipoSoporte === tipo.id ? '#dbeafe' : '#edf2f7', justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                                <AppIcon name={tipo.icono} size={20} color={tipoSoporte === tipo.id ? '#2a5298' : '#4a5568'} />
+                            </View>
                             <View style={styles.optionTextContainer}>
                                 <Text style={[
                                     styles.optionTitle,

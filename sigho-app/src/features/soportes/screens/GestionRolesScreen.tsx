@@ -14,9 +14,11 @@ import {
     Image,
     useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../../core/theme/theme';
 import { obtenerItem, guardarItem, eliminarItem } from '../../../core/utils/storage';
 import { MenuLateralModal } from '../../../core/components/MenuLateralModal';
+import { AppIcon, NombreIcono } from '../../../core/components/AppIcon';
 import {
     obtenerUsuariosConRoles,
     asignarRolUsuario,
@@ -38,7 +40,7 @@ const ROLES_DISPONIBLES: Array<{
     rol: 'OPERADOR' | 'TECNICO' | 'ADMINISTRADOR';
     titulo: string;
     descripcion: string;
-    icono: string;
+    icono: NombreIcono;
     color: string;
     bg: string;
 }> = [
@@ -46,40 +48,40 @@ const ROLES_DISPONIBLES: Array<{
         rol: 'OPERADOR',
         titulo: 'OPERADOR',
         descripcion: 'Recibe solicitudes, asigna prioridad y deriva a técnicos.',
-        icono: '🎧',
-        color: '#2980b9',
-        bg: '#ebf5fb',
+        icono: 'headset',
+        color: '#1d4ed8',
+        bg: '#dbeafe',
     },
     {
         rol: 'TECNICO',
         titulo: 'TÉCNICO',
         descripcion: 'Atiende los soportes asignados, cronometra y sube el acta.',
-        icono: '🧑‍🔧',
-        color: '#8e44ad',
-        bg: '#f5eef8',
+        icono: 'wrench',
+        color: '#6d28d9',
+        bg: '#f3e8ff',
     },
     {
         rol: 'ADMINISTRADOR',
         titulo: 'ADMINISTRADOR',
         descripcion: 'Gestiona los permisos y roles del personal en el sistema.',
-        icono: '🛡️',
-        color: '#d35400',
-        bg: '#fef5e7',
+        icono: 'shield',
+        color: '#b45309',
+        bg: '#fef3c7',
     },
 ];
 
-const obtenerBadgeRol = (rol?: string) => {
+const obtenerBadgeRol = (rol?: string): { texto: string; icono: NombreIcono; color: string; bg: string; border: string } => {
     const r = (rol || 'USUARIO').toUpperCase();
     if (r === 'OPERADOR') {
-        return { texto: '🎧 OPERADOR', color: '#2980b9', bg: '#ebf5fb' };
+        return { texto: 'OPERADOR', icono: 'headset', color: '#1d4ed8', bg: '#dbeafe', border: '#bfdbfe' };
     }
     if (r === 'TECNICO') {
-        return { texto: '🧑‍🔧 TÉCNICO', color: '#8e44ad', bg: '#f5eef8' };
+        return { texto: 'TÉCNICO', icono: 'wrench', color: '#6d28d9', bg: '#f3e8ff', border: '#e9d5ff' };
     }
     if (r === 'ADMINISTRADOR') {
-        return { texto: '🛡️ ADMINISTRADOR', color: '#d35400', bg: '#fef5e7' };
+        return { texto: 'ADMINISTRADOR', icono: 'shield', color: '#b45309', bg: '#fef3c7', border: '#fde68a' };
     }
-    return { texto: '👤 USUARIO', color: '#7f8c8d', bg: '#f2f4f4' };
+    return { texto: 'USUARIO', icono: 'user', color: '#475569', bg: '#f1f5f9', border: '#e2e8f0' };
 };
 
 const obtenerRolesDeUsuario = (item?: UsuarioRolItem | null): string[] => {
@@ -96,6 +98,35 @@ const obtenerRolesDeUsuario = (item?: UsuarioRolItem | null): string[] => {
     return [];
 };
 
+const IconoSalirHeader = () => {
+    if (Platform.OS === 'web') {
+        return (
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+        );
+    }
+    return (
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <View
+                style={{
+                    width: 11,
+                    height: 15,
+                    borderTopWidth: 2,
+                    borderLeftWidth: 2,
+                    borderBottomWidth: 2,
+                    borderColor: '#ffffff',
+                    borderTopLeftRadius: 3,
+                    borderBottomLeftRadius: 3,
+                }}
+            />
+            <Text style={{ color: '#fff', fontSize: 15, fontWeight: 'bold', marginLeft: -4 }}>→</Text>
+        </View>
+    );
+};
+
 export const GestionRolesScreen = ({
     onLogout,
     rolActivo = 'ADMINISTRADOR',
@@ -104,7 +135,9 @@ export const GestionRolesScreen = ({
     onRolesActualizados,
 }: any) => {
     const { width } = useWindowDimensions();
+    const insets = useSafeAreaInsets();
     const esEscritorio = Platform.OS === 'web' && width > 768;
+    const paddingBottomNav = Platform.OS === 'web' ? 10 : Math.max(insets.bottom, 12);
 
     const [usuarios, setUsuarios] = useState<UsuarioRolItem[]>([]);
     const [cargando, setCargando] = useState<boolean>(true);
@@ -117,7 +150,7 @@ export const GestionRolesScreen = ({
     const [busqueda, setBusqueda] = useState<string>('');
     const [tabActivo, setTabActivo] = useState<'ASIGNADOS' | 'TODOS'>('ASIGNADOS');
 
-    // ID del administrador logueado (para bloquear auto-eliminación)
+    // ID del administrador logueado
     const [idAdminActual, setIdAdminActual] = useState<number | null>(null);
 
     // Modal de gestión del usuario seleccionado
@@ -173,11 +206,13 @@ export const GestionRolesScreen = ({
         cargarUsuarios(true);
     };
 
-    // Filtrado por pestaña + barra de búsqueda en tiempo real
+    // Contadores KPI de personal por rol
+    const totalOperadores = usuarios.filter((u) => obtenerRolesDeUsuario(u).includes('OPERADOR')).length;
+    const totalTecnicos = usuarios.filter((u) => obtenerRolesDeUsuario(u).includes('TECNICO')).length;
+    const totalAdmins = usuarios.filter((u) => obtenerRolesDeUsuario(u).includes('ADMINISTRADOR')).length;
+
     const termino = busqueda.trim().toLowerCase();
-
     const personalAsignado = usuarios.filter((u) => obtenerRolesDeUsuario(u).length > 0);
-
     const baseLista = tabActivo === 'ASIGNADOS' ? personalAsignado : usuarios;
 
     const usuariosFiltrados = baseLista.filter((u) => {
@@ -295,52 +330,74 @@ export const GestionRolesScreen = ({
 
     const renderUsuarioCard = ({ item }: { item: UsuarioRolItem }) => {
         const rolesUsuario = obtenerRolesDeUsuario(item);
-        const badges = rolesUsuario.length > 0
-            ? rolesUsuario.map((r) => obtenerBadgeRol(r))
-            : [obtenerBadgeRol('USUARIO')];
+        const badges =
+            rolesUsuario.length > 0
+                ? rolesUsuario.map((r) => obtenerBadgeRol(r))
+                : [obtenerBadgeRol('USUARIO')];
         const esUsuarioActual =
             idAdminActual !== null && Number(item.id_usuario) === Number(idAdminActual);
 
         return (
             <TouchableOpacity
-                style={[
-                    styles.card,
-                    { borderLeftColor: badges[0].color },
-                ]}
+                style={styles.card}
                 onPress={() => abrirModalUsuario(item)}
+                activeOpacity={0.85}
             >
-                <View style={styles.cardHeaderRow}>
-                    <View style={{ flex: 1, paddingRight: 10 }}>
-                        <Text style={styles.userName}>
-                            {item.nombre_completo}
-                            {esUsuarioActual ? ' (Tú)' : ''}
-                        </Text>
-                        <Text style={styles.userMeta}>
-                            Usuario: <Text style={{ fontWeight: '600' }}>{item.username}</Text>
-                            {item.ci ? `  |  CI: ${item.ci}` : ''}
-                        </Text>
-                    </View>
-
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end', maxWidth: '52%' }}>
+                {/* Fila superior con insignias de rol */}
+                <View style={styles.cardTopRow}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, flex: 1 }}>
                         {badges.map((b, i) => (
                             <View
                                 key={i}
                                 style={[
                                     styles.roleBadge,
-                                    { backgroundColor: b.bg, borderColor: b.color },
+                                    { backgroundColor: b.bg, borderColor: b.border, flexDirection: 'row', alignItems: 'center', gap: 5 },
                                 ]}
                             >
+                                <AppIcon name={b.icono} size={12} color={b.color} />
                                 <Text style={[styles.roleBadgeText, { color: b.color }]}>
                                     {b.texto}
                                 </Text>
                             </View>
                         ))}
                     </View>
+                    <Text style={styles.userIdRight}>ID #{item.id_usuario}</Text>
                 </View>
 
-                <Text style={styles.tapHint}>
-                    Toca para agregar o quitar roles →
-                </Text>
+                {/* Fila principal con avatar circular + Nombre del funcionario */}
+                <View style={styles.cardMainRow}>
+                    <View style={styles.userAvatarCircle}>
+                        <AppIcon name="user" size={19} color="#164a96" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.userName}>
+                            {item.nombre_completo}
+                            {esUsuarioActual ? ' (Tú)' : ''}
+                        </Text>
+                        <Text style={styles.userSub}>
+                            USUARIO: {item.username}
+                        </Text>
+                    </View>
+                </View>
+
+                <View style={styles.divider} />
+
+                <View style={styles.cardFooterRow}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <AppIcon name="id-card" size={15} color="#475569" />
+                        <Text style={[styles.userMetaText, { marginLeft: 6 }]}>
+                            CI: {item.ci || 'No registrado'}
+                        </Text>
+                    </View>
+
+                    <TouchableOpacity
+                        style={styles.detailsButton}
+                        onPress={() => abrirModalUsuario(item)}
+                        activeOpacity={0.8}
+                    >
+                        <Text style={styles.detailsButtonText}>Gestionar rol</Text>
+                    </TouchableOpacity>
+                </View>
             </TouchableOpacity>
         );
     };
@@ -355,156 +412,220 @@ export const GestionRolesScreen = ({
 
     return (
         <View style={styles.container}>
-            {/* CABECERA */}
-            <View style={[styles.header, !esEscritorio && { paddingTop: 42 }]}>
-                <View style={[
-                    {
-                        width: '100%',
-                        flexDirection: 'row',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        marginBottom: esEscritorio ? 4 : 10,
-                    },
-                    esEscritorio && { maxWidth: 880, alignSelf: 'center' }
-                ]}>
-                    {/* Grupo superior izquierdo: [ ☰ ] + [ Logo SSU La Paz ] */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            {/* CABECERA AZUL CON ONDA CURVA */}
+            <View style={styles.topHeader}>
+                <View
+                    style={[
+                        styles.topBarRow,
+                        esEscritorio && { maxWidth: 880, alignSelf: 'center' },
+                    ]}
+                >
+                    <View style={styles.leftBarGroup}>
                         {tieneMultiplesRolesSesion && (
                             <TouchableOpacity
-                                style={{
-                                    width: esEscritorio ? 44 : 38,
-                                    height: esEscritorio ? 44 : 38,
-                                    borderRadius: 8,
-                                    backgroundColor: 'rgba(255,255,255,0.22)',
-                                    borderWidth: 1,
-                                    borderColor: 'rgba(255,255,255,0.4)',
-                                    justifyContent: 'center',
-                                    alignItems: 'center',
-                                }}
+                                style={styles.iconActionBtn}
                                 onPress={() => setMenuLateralVisible(true)}
                                 activeOpacity={0.75}
                             >
-                                <Text style={{ color: '#ffffff', fontSize: esEscritorio ? 22 : 20, fontWeight: 'bold', lineHeight: 24 }}>
-                                    ☰
-                                </Text>
+                                <AppIcon name="menu" size={20} color="#ffffff" />
                             </TouchableOpacity>
                         )}
 
-                        <View style={{
-                            backgroundColor: '#ffffff',
-                            borderRadius: 8,
-                            paddingHorizontal: esEscritorio ? 8 : 6,
-                            paddingVertical: esEscritorio ? 4 : 3,
-                            elevation: 2,
-                            shadowColor: '#000',
-                            shadowOffset: { width: 0, height: 1 },
-                            shadowOpacity: 0.15,
-                            shadowRadius: 2,
-                        }}>
-                            <Image
-                                source={require('../../../../assets/ssu-logo.png')}
-                                style={{
-                                    width: esEscritorio ? 105 : 74,
-                                    height: esEscritorio ? 44 : 31,
-                                }}
-                                resizeMode="contain"
-                            />
-                        </View>
+                        <Image
+                            source={require('../../../../assets/7.png')}
+                            style={{
+                                width: esEscritorio ? 90 : 70,
+                                height: esEscritorio ? 36 : 28,
+                            }}
+                            resizeMode="contain"
+                        />
                     </View>
 
-                    <TouchableOpacity style={styles.logoutButton} onPress={manejarCerrarSesion}>
-                        <Text style={styles.logoutText}>Salir</Text>
+                    <Text style={styles.navBarTitle} numberOfLines={1}>
+                        Gestión de Roles
+                    </Text>
+
+                    <TouchableOpacity
+                        style={styles.iconActionBtn}
+                        onPress={manejarCerrarSesion}
+                        activeOpacity={0.75}
+                    >
+                        <AppIcon name="logout" size={19} color="#ffffff" />
                     </TouchableOpacity>
                 </View>
 
-                <Text style={styles.headerTitle}>Gestión de Roles</Text>
-                <Text style={styles.headerSubtitle}>Modo: ADMINISTRADOR</Text>
-
-                {/* DOS PESTAÑAS: PERSONAL ASIGNADO / TODOS LOS USUARIOS */}
-                <View style={[styles.tabsContainer, esEscritorio && { maxWidth: 880, alignSelf: 'center' }]}>
-                    <TouchableOpacity
-                        style={[styles.tabButton, tabActivo === 'ASIGNADOS' && styles.tabActivo]}
-                        onPress={() => setTabActivo('ASIGNADOS')}
-                    >
-                        <Text style={[styles.tabText, tabActivo === 'ASIGNADOS' && styles.tabTextActivo]}>
-                            Personal Asignado ({personalAsignado.length})
-                        </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={[styles.tabButton, tabActivo === 'TODOS' && styles.tabActivo]}
-                        onPress={() => setTabActivo('TODOS')}
-                    >
-                        <Text style={[styles.tabText, tabActivo === 'TODOS' && styles.tabTextActivo]}>
-                            Todos los Usuarios ({usuarios.length})
-                        </Text>
-                    </TouchableOpacity>
-                </View>
+                <Image
+                    source={require('../../../../assets/ondas-superiores.png')}
+                    style={styles.headerBottomWave}
+                    resizeMode="stretch"
+                />
             </View>
 
-            {/* BARRA DE BÚSQUEDA EN TIEMPO REAL */}
-            <View style={[styles.searchContainer, esEscritorio && { width: '100%', maxWidth: 912, alignSelf: 'center' }]}>
-                <View style={styles.searchInputWrapper}>
-                    <Text style={styles.searchIcon}>🔍</Text>
+            {/* ENCABEZADO DE SECCIÓN + 3 TARJETAS KPI + BUSCADOR */}
+            <View style={[styles.topSummarySection, esEscritorio && { width: '100%', maxWidth: 912, alignSelf: 'center' }]}>
+                <View style={styles.sectionBannerRow}>
+                    <View style={styles.blueCircleIcon}>
+                        <AppIcon name="shield" size={20} color="#ffffff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.sectionBannerTitle}>
+                            Personal y Permisos del Sistema
+                        </Text>
+                        <Text style={styles.sectionBannerSub}>
+                            Modo activo: ADMINISTRADOR
+                        </Text>
+                    </View>
+                </View>
+
+                {/* 3 Tarjetas KPI */}
+                <View style={styles.kpiRow}>
+                    <View style={styles.kpiCard}>
+                        <Text style={styles.kpiNumber}>{totalOperadores}</Text>
+                        <Text style={styles.kpiLabel}>Operadores</Text>
+                    </View>
+                    <View style={styles.kpiCard}>
+                        <Text style={styles.kpiNumber}>{totalTecnicos}</Text>
+                        <Text style={styles.kpiLabel}>Técnicos</Text>
+                    </View>
+                    <View style={styles.kpiCard}>
+                        <Text style={styles.kpiNumber}>{totalAdmins}</Text>
+                        <Text style={styles.kpiLabel}>Administradores</Text>
+                    </View>
+                </View>
+
+                {/* Buscador en forma de píldora */}
+                <View style={styles.searchPillWrapper}>
+                    <View style={{ marginRight: 8 }}>
+                        <AppIcon name="search" size={16} color="#64748b" />
+                    </View>
                     <TextInput
                         style={styles.searchInput}
                         placeholder="Buscar funcionario por nombre, usuario, CI o rol..."
-                        placeholderTextColor="#888"
+                        placeholderTextColor="#94a3b8"
                         value={busqueda}
                         onChangeText={setBusqueda}
                     />
                     {busqueda.length > 0 && (
                         <TouchableOpacity onPress={() => setBusqueda('')} style={{ padding: 6 }}>
-                            <Text style={{ fontSize: 16, color: '#888', fontWeight: 'bold' }}>✕</Text>
+                            <AppIcon name="close" size={14} color="#64748b" />
                         </TouchableOpacity>
                     )}
                 </View>
             </View>
 
             {/* LISTADO */}
-            {cargando ? (
-                <View style={styles.centerContainer}>
-                    <ActivityIndicator size="large" color={theme.colors.primary} />
+            <View style={{ flex: 1 }}>
+                {cargando ? (
+                    <View style={styles.centerContainer}>
+                        <ActivityIndicator size="large" color={theme.colors.primary} />
+                    </View>
+                ) : (
+                    <FlatList
+                        data={usuariosFiltrados}
+                        keyExtractor={(item, index) => `${item.id_usuario}-${index}`}
+                        contentContainerStyle={[
+                            styles.listContainer,
+                            esEscritorio && { width: '100%', maxWidth: 912, alignSelf: 'center' },
+                        ]}
+                        renderItem={renderUsuarioCard}
+                        refreshControl={
+                            <RefreshControl
+                                refreshing={refrescando}
+                                onRefresh={onRefresh}
+                                colors={[theme.colors.primary]}
+                            />
+                        }
+                        ListEmptyComponent={
+                            <View style={styles.emptyCardBox}>
+                                <Text style={styles.emptyText}>
+                                    {termino
+                                        ? `No se encontraron funcionarios que coincidan con "${busqueda}".`
+                                        : tabActivo === 'ASIGNADOS'
+                                            ? 'Aún no hay usuarios con rol de Operador, Técnico o Administrador.'
+                                            : 'No se encontraron usuarios registrados.'}
+                                </Text>
+                                {tabActivo === 'ASIGNADOS' && (
+                                    <TouchableOpacity
+                                        style={styles.goToAllButton}
+                                        onPress={() => setTabActivo('TODOS')}
+                                    >
+                                        <Text style={styles.goToAllButtonText}>
+                                            Ir a "Todos los Usuarios" para otorgar un rol
+                                        </Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        }
+                    />
+                )}
+
+                {/* Ondas celestes decorativas en la base */}
+                <View style={styles.bottomWavesWrapper} pointerEvents="none">
+                    <Image
+                        source={require('../../../../assets/ondas-inferiores.png')}
+                        style={styles.bottomWavesImg}
+                        resizeMode="stretch"
+                    />
                 </View>
-            ) : (
-                <FlatList
-                    data={usuariosFiltrados}
-                    keyExtractor={(item, index) => `${item.id_usuario}-${index}`}
-                    contentContainerStyle={[
-                        styles.listContainer,
-                        esEscritorio && { width: '100%', maxWidth: 912, alignSelf: 'center' }
+            </View>
+
+            {/* BARRA DE NAVEGACIÓN INFERIOR */}
+            <View style={[styles.bottomNavBar, { paddingBottom: paddingBottomNav }]}>
+                <View
+                    style={[
+                        styles.bottomNavInner,
+                        esEscritorio && { maxWidth: 880, alignSelf: 'center' },
                     ]}
-                    renderItem={renderUsuarioCard}
-                    refreshControl={
-                        <RefreshControl
-                            refreshing={refrescando}
-                            onRefresh={onRefresh}
-                            colors={[theme.colors.primary]}
+                >
+                    <TouchableOpacity
+                        style={[
+                            styles.bottomNavTab,
+                            tabActivo === 'ASIGNADOS' && styles.bottomNavTabActive,
+                        ]}
+                        onPress={() => setTabActivo('ASIGNADOS')}
+                        activeOpacity={0.8}
+                    >
+                        <AppIcon
+                            name="shield"
+                            size={17}
+                            color={tabActivo === 'ASIGNADOS' ? '#ffffff' : '#475569'}
                         />
-                    }
-                    ListEmptyComponent={
-                        <View style={{ alignItems: 'center', marginTop: 40, paddingHorizontal: 20 }}>
-                            <Text style={styles.emptyText}>
-                                {termino
-                                    ? `No se encontraron funcionarios que coincidan con "${busqueda}".`
-                                    : tabActivo === 'ASIGNADOS'
-                                        ? 'Aún no hay usuarios con rol de Operador, Técnico o Administrador.'
-                                        : 'No se encontraron usuarios registrados.'}
-                            </Text>
-                            {tabActivo === 'ASIGNADOS' && (
-                                <TouchableOpacity
-                                    style={styles.goToAllButton}
-                                    onPress={() => setTabActivo('TODOS')}
-                                >
-                                    <Text style={styles.goToAllButtonText}>
-                                        Ir a "Todos los Usuarios" para otorgar un rol
-                                    </Text>
-                                </TouchableOpacity>
-                            )}
-                        </View>
-                    }
-                />
-            )}
+                        <Text
+                            style={[
+                                styles.bottomNavLabel,
+                                { marginTop: 3 },
+                                tabActivo === 'ASIGNADOS' && styles.bottomNavTextActive,
+                            ]}
+                        >
+                            Personal Asignado ({personalAsignado.length})
+                        </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={[
+                            styles.bottomNavTab,
+                            tabActivo === 'TODOS' && styles.bottomNavTabActive,
+                        ]}
+                        onPress={() => setTabActivo('TODOS')}
+                        activeOpacity={0.8}
+                    >
+                        <AppIcon
+                            name="users"
+                            size={17}
+                            color={tabActivo === 'TODOS' ? '#ffffff' : '#475569'}
+                        />
+                        <Text
+                            style={[
+                                styles.bottomNavLabel,
+                                { marginTop: 3 },
+                                tabActivo === 'TODOS' && styles.bottomNavTextActive,
+                            ]}
+                        >
+                            Todos los Usuarios ({usuarios.length})
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
 
             {/* MODAL PARA OTORGAR / CAMBIAR / QUITAR ROL */}
             <Modal
@@ -575,12 +696,15 @@ export const GestionRolesScreen = ({
                                             onPress={() => handleAlternarRol(opcion.rol)}
                                         >
                                             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                                                <Text style={[styles.roleOptionTitle, { color: opcion.color }]}>
-                                                    {opcion.icono} {opcion.titulo}
-                                                </Text>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                                                    <AppIcon name={opcion.icono} size={16} color={opcion.color} />
+                                                    <Text style={[styles.roleOptionTitle, { color: opcion.color }]}>
+                                                        {opcion.titulo}
+                                                    </Text>
+                                                </View>
                                                 {esRolActivo ? (
                                                     <Text style={{ fontSize: 12, fontWeight: 'bold', color: opcion.color }}>
-                                                        {bloqueadoQuitarPropioAdmin ? '🔒 ACTIVO (PROTEGIDO)' : '✓ ACTIVO (Toca para quitar)'}
+                                                        {bloqueadoQuitarPropioAdmin ? 'ACTIVO (PROTEGIDO)' : '✓ ACTIVO (Toca para quitar)'}
                                                     </Text>
                                                 ) : (
                                                     <Text style={{ fontSize: 12, fontWeight: '600', color: '#7f8c8d' }}>
@@ -599,11 +723,12 @@ export const GestionRolesScreen = ({
                                         {!confirmandoQuitar ? (
                                             <TouchableOpacity
                                                 disabled={guardandoAccion}
-                                                style={styles.removeRoleBtn}
+                                                style={[styles.removeRoleBtn, { flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
                                                 onPress={() => setConfirmandoQuitar(true)}
                                             >
+                                                <AppIcon name="trash" size={16} color="#c0392b" />
                                                 <Text style={styles.removeRoleBtnText}>
-                                                    🗑️ Quitar Rol (Volver a Usuario)
+                                                    Quitar todos los roles (Volver a Usuario)
                                                 </Text>
                                             </TouchableOpacity>
                                         ) : (
@@ -654,7 +779,7 @@ export const GestionRolesScreen = ({
                 </View>
             </Modal>
 
-            {/* MENÚ LATERAL PARA CAMBIAR ENTRE ROLES (ej. ADMINISTRADOR <-> OPERADOR) */}
+            {/* MENÚ LATERAL PARA CAMBIAR ENTRE ROLES */}
             <MenuLateralModal
                 visible={menuLateralVisible}
                 onClose={() => setMenuLateralVisible(false)}
@@ -670,136 +795,248 @@ export const GestionRolesScreen = ({
 };
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: theme.colors.background },
+    container: { flex: 1, backgroundColor: '#f8fafc' },
     centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    header: {
-        backgroundColor: theme.colors.primary,
-        paddingTop: 60,
-        paddingBottom: 20,
-        paddingHorizontal: theme.spacing.lg,
-        alignItems: 'center',
-    },
-    headerTitle: {
-        color: theme.colors.textLight,
-        fontSize: theme.typography.sizes.title,
-        fontWeight: 'bold',
-    },
-    headerSubtitle: {
-        color: theme.colors.textLight,
-        fontSize: theme.typography.sizes.sm,
-        marginTop: 4,
-        opacity: 0.9,
-    },
-    logoutButton: {
-        paddingVertical: 9,
-        paddingHorizontal: 12,
-        backgroundColor: 'rgba(255,0,0,0.75)',
-        borderRadius: 6,
-    },
-    logoutText: { color: 'white', fontWeight: 'bold' },
 
-    tabsContainer: {
-        flexDirection: 'row',
-        marginTop: 20,
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        borderRadius: 8,
-        padding: 4,
+    // CABECERA AZUL CON ONDA CURVA
+    topHeader: {
+        backgroundColor: '#164a96',
+        paddingTop: Platform.OS === 'web' ? 18 : 42,
+        paddingBottom: 34,
+        paddingHorizontal: 16,
+        position: 'relative',
+        overflow: 'hidden',
+    },
+    topBarRow: {
         width: '100%',
-    },
-    tabButton: {
-        flex: 1,
-        paddingVertical: 10,
+        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: 6,
+        justifyContent: 'space-between',
     },
-    tabActivo: { backgroundColor: '#ffffff' },
-    tabText: { color: '#ffffff', fontWeight: 'bold', textAlign: 'center', fontSize: 13 },
-    tabTextActivo: { color: theme.colors.primary },
+    leftBarGroup: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    navBarTitle: {
+        color: '#ffffff',
+        fontSize: 17,
+        fontWeight: 'bold',
+        textAlign: 'center',
+        flex: 1,
+        marginHorizontal: 8,
+    },
+    iconActionBtn: {
+        width: 38,
+        height: 38,
+        borderRadius: 10,
+        backgroundColor: 'rgba(255, 255, 255, 0.14)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    headerBottomWave: {
+        position: 'absolute',
+        bottom: -2,
+        left: 0,
+        right: 0,
+        width: '100%',
+        height: 30,
+    },
 
-    searchContainer: {
-        paddingHorizontal: theme.spacing.md,
-        paddingTop: 14,
+    // SECCIÓN DE RESUMEN Y BUSCADOR
+    topSummarySection: {
+        paddingHorizontal: 16,
+        paddingTop: 10,
         paddingBottom: 6,
     },
-    searchInputWrapper: {
+    sectionBannerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 12,
+    },
+    blueCircleIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#1d68d8',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+        elevation: 2,
+    },
+    sectionBannerTitle: {
+        fontSize: 16.5,
+        fontWeight: 'bold',
+        color: '#0f294a',
+    },
+    sectionBannerSub: {
+        fontSize: 12.5,
+        color: '#475569',
+        marginTop: 1,
+    },
+    kpiRow: {
+        flexDirection: 'row',
+        gap: 10,
+        marginBottom: 12,
+    },
+    kpiCard: {
+        flex: 1,
+        backgroundColor: '#ffffff',
+        borderRadius: 14,
+        paddingVertical: 10,
+        paddingHorizontal: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+        elevation: 2,
+        shadowColor: '#0f172a',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+    },
+    kpiNumber: {
+        fontSize: 19,
+        fontWeight: 'bold',
+        color: '#0f4c9c',
+    },
+    kpiLabel: {
+        fontSize: 11,
+        color: '#64748b',
+        marginTop: 2,
+        textAlign: 'center',
+        fontWeight: '500',
+    },
+    searchPillWrapper: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: '#ffffff',
-        borderRadius: 8,
-        paddingHorizontal: 12,
+        borderRadius: 24,
+        paddingHorizontal: 14,
         borderWidth: 1,
-        borderColor: '#dce1e7',
-        elevation: 1,
+        borderColor: '#cbd5e1',
+        height: 46,
     },
-    searchIcon: { fontSize: 16, marginRight: 8 },
+    searchIcon: { fontSize: 15, marginRight: 8 },
     searchInput: {
         flex: 1,
-        paddingVertical: 11,
         fontSize: 14,
-        color: '#333',
+        color: '#1e293b',
     },
 
+    // TARJETAS DE USUARIOS
     listContainer: {
-        padding: theme.spacing.md,
-        paddingBottom: 40,
+        paddingHorizontal: 16,
+        paddingTop: 10,
+        paddingBottom: 90,
     },
     card: {
         backgroundColor: '#ffffff',
         padding: 15,
-        borderRadius: 8,
-        marginBottom: 10,
-        elevation: 2,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 2,
-        borderLeftWidth: 4,
+        borderRadius: 16,
+        marginBottom: 12,
+        elevation: 3,
+        shadowColor: '#0f172a',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 6,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
     },
-    cardHeaderRow: {
+    cardTopRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 10,
+    },
+    roleBadge: {
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 8,
+        borderWidth: 1,
+    },
+    roleBadgeText: {
+        fontSize: 10.5,
+        fontWeight: 'bold',
+    },
+    userIdRight: {
+        fontSize: 11.5,
+        color: '#64748b',
+        fontWeight: '600',
+    },
+    cardMainRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 10,
+    },
+    userAvatarCircle: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        backgroundColor: '#eff6ff',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+        borderWidth: 1,
+        borderColor: '#dbeafe',
+    },
+    userName: {
+        fontSize: 14.5,
+        fontWeight: 'bold',
+        color: '#1e3a8a',
+    },
+    userSub: {
+        fontSize: 12,
+        color: '#64748b',
+        marginTop: 2,
+    },
+    divider: {
+        height: 1,
+        backgroundColor: '#f1f5f9',
+        marginBottom: 10,
+    },
+    cardFooterRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
     },
-    userName: {
-        fontSize: 15,
-        fontWeight: 'bold',
-        color: '#2c3e50',
-        marginBottom: 3,
+    userMetaText: {
+        fontSize: 12.5,
+        color: '#334155',
     },
-    userMeta: {
-        fontSize: 13,
-        color: '#666',
+    detailsButton: {
+        backgroundColor: '#0f4c9c',
+        paddingHorizontal: 16,
+        paddingVertical: 7,
+        borderRadius: 10,
     },
-    roleBadge: {
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-        borderRadius: 6,
-        borderWidth: 1,
-    },
-    roleBadgeText: {
+    detailsButtonText: {
+        color: '#ffffff',
         fontSize: 12,
         fontWeight: 'bold',
-    },
-    tapHint: {
-        fontSize: 12,
-        color: theme.colors.primary,
-        marginTop: 8,
-        fontWeight: '500',
     },
 
+    emptyCardBox: {
+        backgroundColor: '#ffffff',
+        borderRadius: 12,
+        padding: 18,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+        alignItems: 'center',
+        marginTop: 10,
+    },
     emptyText: {
         textAlign: 'center',
-        color: theme.colors.textSecondary,
-        fontSize: 15,
-        lineHeight: 22,
+        color: '#475569',
+        fontSize: 14,
+        lineHeight: 20,
     },
     goToAllButton: {
-        marginTop: 14,
-        backgroundColor: theme.colors.primary,
+        marginTop: 12,
+        backgroundColor: '#0f4c9c',
         paddingVertical: 10,
         paddingHorizontal: 18,
-        borderRadius: 6,
+        borderRadius: 10,
     },
     goToAllButtonText: {
         color: '#fff',
@@ -807,6 +1044,63 @@ const styles = StyleSheet.create({
         fontSize: 13,
     },
 
+    // ONDAS INFERIORES + BOTTOM NAV
+    bottomWavesWrapper: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: 44,
+        overflow: 'hidden',
+    },
+    bottomWavesImg: {
+        width: '100%',
+        height: 44,
+    },
+    bottomNavBar: {
+        backgroundColor: '#ffffff',
+        borderTopWidth: 1,
+        borderTopColor: '#e2e8f0',
+        paddingTop: 8,
+        paddingHorizontal: 14,
+        elevation: 10,
+        shadowColor: '#0f172a',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 6,
+    },
+    bottomNavInner: {
+        flexDirection: 'row',
+        width: '100%',
+        gap: 10,
+    },
+    bottomNavTab: {
+        flex: 1,
+        paddingVertical: 8,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'transparent',
+    },
+    bottomNavTabActive: {
+        backgroundColor: '#0f4c9c',
+    },
+    bottomNavIcon: {
+        fontSize: 16,
+        color: '#475569',
+        marginBottom: 2,
+    },
+    bottomNavLabel: {
+        fontSize: 11.5,
+        fontWeight: '600',
+        color: '#475569',
+    },
+    bottomNavTextActive: {
+        color: '#ffffff',
+        fontWeight: 'bold',
+    },
+
+    // MODAL
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0,0,0,0.5)',
@@ -815,7 +1109,7 @@ const styles = StyleSheet.create({
     },
     modalContent: {
         backgroundColor: '#fff',
-        borderRadius: 12,
+        borderRadius: 14,
         padding: 20,
         maxWidth: 500,
         width: '100%',
@@ -877,7 +1171,7 @@ const styles = StyleSheet.create({
     },
     roleOptionBtn: {
         borderWidth: 1.5,
-        borderRadius: 8,
+        borderRadius: 10,
         padding: 12,
         marginBottom: 10,
     },

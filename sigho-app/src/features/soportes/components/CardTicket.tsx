@@ -1,30 +1,25 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { TicketSoporte } from '../types/soporte.types';
-import { theme } from '../../../core/theme/theme';
+import { AppIcon } from '../../../core/components/AppIcon';
 
 interface Props {
     ticket: TicketSoporte;
     onPress: () => void;
 }
 
-const obtenerColorEstado = (estado: string) => {
+const obtenerEstiloEstado = (estado: string) => {
     switch (estado) {
         case 'FINALIZADA':
-            return '#27ae60'; // Verde (Concluido)
+            return { texto: 'FINALIZADA', color: '#15803d', bg: '#dcfce7', border: '#bbf7d0' };
         case 'EN_PROCESO':
-            return '#8e44ad'; // Morado (En proceso por el técnico)
+            return { texto: 'EN PROCESO', color: '#6d28d9', bg: '#f3e8ff', border: '#e9d5ff' };
         case 'ASIGNADA':
-            return '#3498db'; // Azul celeste (Ya asignado a técnico)
+            return { texto: 'ASIGNADA', color: '#1d4ed8', bg: '#dbeafe', border: '#bfdbfe' };
         case 'PENDIENTE':
         default:
-            return '#f39c12'; // Naranja (Pendiente de asignar)
+            return { texto: 'PENDIENTE', color: '#b45309', bg: '#fef3c7', border: '#fde68a' };
     }
-};
-
-const obtenerTextoEstado = (estado: string) => {
-    if (estado === 'EN_PROCESO') return 'EN PROCESO';
-    return estado;
 };
 
 const obtenerInfoPrioridad = (prioridad?: string) => {
@@ -42,7 +37,7 @@ const formatearFechaHora = (fechaIso?: string) => {
     if (isNaN(d.getTime())) return 'No registrada';
     const fecha = d.toLocaleDateString('es-BO', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const hora = d.toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    return `${fecha} — ${hora}`;
+    return `${fecha}  —  ${hora}`;
 };
 
 const formatearSegundos = (totalSegundos: number) => {
@@ -79,10 +74,16 @@ const obtenerTiempoEfectivoTrabajo = (ticket: TicketSoporte) => {
     return 'No iniciado';
 };
 
+// Icono circular institucional de soporte
+const IconoSoporteCircular = () => (
+    <View style={styles.avatarCircle}>
+        <AppIcon name="laptop" size={20} color="#164a96" />
+    </View>
+);
+
 export const CardTicket = ({ ticket, onPress }: Props) => {
-    // Extraemos el ID real sin importar cómo venga de la base de datos
     const idReal = ticket.id || ticket.id_solicitud;
-    const colorEstado = obtenerColorEstado(ticket.estado);
+    const estiloEstado = obtenerEstiloEstado(ticket.estado);
     const numInsistencias = Number(ticket.cantidad_resolicitudes || 0);
     const tieneInsistencia = numInsistencias > 0 && ticket.estado !== 'FINALIZADA';
     const infoPrioridad = obtenerInfoPrioridad(ticket.prioridad);
@@ -91,99 +92,171 @@ export const CardTicket = ({ ticket, onPress }: Props) => {
         <TouchableOpacity
             style={[
                 styles.card,
-                { borderLeftColor: tieneInsistencia ? '#e74c3c' : colorEstado },
-                tieneInsistencia && { borderWidth: 1, borderColor: '#f5b7b1', backgroundColor: '#fffdfd' }
+                tieneInsistencia && { borderColor: '#fca5a5', backgroundColor: '#fffcfc' }
             ]}
             onPress={onPress}
+            activeOpacity={0.85}
         >
-            <View style={styles.headerRow}>
-                {/* Número de Ticket */}
-                <Text style={styles.ticketId}>Ticket #{idReal}</Text>
+            {/* 1. FILA SUPERIOR: Pastillas de Estado / Prioridad / Insistencia (Izquierda) + Ticket #ID (Derecha) */}
+            <View style={styles.topRow}>
+                <View style={styles.badgesWrap}>
+                    {/* Pastilla suave de Estado */}
+                    <View style={[styles.softPill, { backgroundColor: estiloEstado.bg, borderColor: estiloEstado.border }]}>
+                        <Text style={[styles.softPillText, { color: estiloEstado.color }]}>
+                            {estiloEstado.texto}
+                        </Text>
+                    </View>
 
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', flexShrink: 1, marginLeft: 8 }}>
-                    {/* Etiqueta de PRIORIDAD (Punto de color nativo + Texto para evitar corte de emoji en Android) */}
+                    {/* Pastilla de Prioridad (Punto de color nativo + Texto) */}
                     {infoPrioridad && (
-                        <View style={[styles.badge, { backgroundColor: infoPrioridad.bg, borderWidth: 1, borderColor: infoPrioridad.color, flexDirection: 'row', alignItems: 'center', marginLeft: 4, marginBottom: 2 }]}>
-                            <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: infoPrioridad.dot, marginRight: 5 }} />
-                            <Text style={[styles.badgeText, { color: infoPrioridad.color }]}>
+                        <View style={[styles.softPill, { backgroundColor: infoPrioridad.bg, borderColor: infoPrioridad.color, flexDirection: 'row', alignItems: 'center' }]}>
+                            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: infoPrioridad.dot, marginRight: 5 }} />
+                            <Text style={[styles.softPillText, { color: infoPrioridad.color }]}>
                                 {infoPrioridad.texto}
                             </Text>
                         </View>
                     )}
 
-                    {/* Etiqueta de INSISTENCIA / RE-SOLICITADO */}
+                    {/* Pastilla de Insistencia */}
                     {tieneInsistencia && (
-                        <View style={[styles.badge, { backgroundColor: '#e74c3c', marginLeft: 4, marginBottom: 2 }]}>
-                            <Text style={styles.badgeText}>
-                                🔔 INSISTENCIA ({numInsistencias})
+                        <View style={[styles.softPill, { backgroundColor: '#fee2e2', borderColor: '#f87171', flexDirection: 'row', alignItems: 'center', gap: 5 }]}>
+                            <AppIcon name="bell" size={12} color="#b91c1c" />
+                            <Text style={[styles.softPillText, { color: '#b91c1c' }]}>
+                                INSISTENCIA ({numInsistencias})
                             </Text>
                         </View>
                     )}
+                </View>
 
-                    {/* Etiqueta de Estado */}
-                    <View style={[
-                        styles.badge,
-                        { backgroundColor: colorEstado, marginLeft: 4, marginBottom: 2 }
-                    ]}>
-                        <Text style={styles.badgeText}>{obtenerTextoEstado(ticket.estado)}</Text>
-                    </View>
+                <Text style={styles.ticketIdRight}>
+                    {ticket.estado === 'FINALIZADA' ? `Historial #${idReal}` : `Ticket #${idReal}`}
+                </Text>
+            </View>
+
+            {/* 2. FILA PRINCIPAL CON ICONO CIRCULAR + OFICINA Y PISO */}
+            <View style={styles.mainHeaderRow}>
+                <IconoSoporteCircular />
+                <View style={{ flex: 1 }}>
+                    <Text style={styles.officeTitle}>
+                        {(ticket.oficina || 'OFICINA').toUpperCase()}
+                    </Text>
+                    <Text style={styles.floorSubtitle}>
+                        PISO: {(ticket.piso || 'NO ESPECIFICADO').toUpperCase()}
+                    </Text>
                 </View>
             </View>
 
-            <Text style={styles.title}>Oficina: {ticket.oficina}</Text>
-            <Text style={styles.subtitle}>Piso: {ticket.piso}</Text>
-            {ticket.estado === 'EN_PROCESO' ? (
-                <Text style={[styles.tecnicoText, { color: '#8e44ad' }]}>
-                    🛠️ En proceso por: {ticket.nombre_tecnico || 'Técnico asignado'}
-                </Text>
-            ) : ticket.nombre_tecnico ? (
-                <Text style={styles.tecnicoText}>
-                    🧑‍🔧 Asignado a: {ticket.nombre_tecnico}
-                </Text>
-            ) : null}
+            <View style={styles.divider} />
 
-            {/* HORAS DE ASIGNACIÓN, INICIO DE PROCESO, FINALIZACIÓN Y TIEMPOS EN HISTORIAL (FINALIZADA) */}
-            {ticket.estado === 'FINALIZADA' && (
-                <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#eee' }}>
-                    <Text style={{ fontSize: 12, color: '#555', marginBottom: 2 }}>
-                        📌 <Text style={{ fontWeight: 'bold', color: '#2980b9' }}>Asignado:</Text> {formatearFechaHora(ticket.fecha_asignacion)}
-                    </Text>
-                    <Text style={{ fontSize: 12, color: '#555', marginBottom: 2 }}>
-                        ▶️ <Text style={{ fontWeight: 'bold', color: '#8e44ad' }}>En Proceso:</Text> {formatearFechaHora(ticket.fecha_inicio)}
-                    </Text>
-                    <Text style={{ fontSize: 12, color: '#555', marginBottom: 6 }}>
-                        ✅ <Text style={{ fontWeight: 'bold', color: '#27ae60' }}>Finalizado:</Text> {formatearFechaHora(ticket.fecha_finalizacion)}
-                    </Text>
-
-                    <View style={{ paddingTop: 6, borderTopWidth: 1, borderTopColor: '#f2f2f2' }}>
-                        <Text style={{ fontSize: 12, color: '#555', marginBottom: 2 }}>
-                            ⏱️ <Text style={{ fontWeight: 'bold', color: '#2980b9' }}>1. Tiempo total desde Asignación:</Text>{' '}
-                            <Text style={{ fontWeight: 'bold', color: '#333' }}>{obtenerTiempoTotalAsignacion(ticket)}</Text>
-                        </Text>
-                        <Text style={{ fontSize: 12, color: '#555' }}>
-                            🛠️ <Text style={{ fontWeight: 'bold', color: '#8e44ad' }}>2. Tiempo efectivo de trabajo:</Text>{' '}
-                            <Text style={{ fontWeight: 'bold', color: '#333' }}>{obtenerTiempoEfectivoTrabajo(ticket)}</Text>
+            {/* 3. DETALLES CON ICONOS VECTORIALES LIMPIOS */}
+            <View style={styles.detailsList}>
+                {ticket.estado === 'EN_PROCESO' ? (
+                    <View style={styles.iconRowItem}>
+                        <AppIcon name="wrench" size={15} color="#6d28d9" />
+                        <Text style={[styles.detailRowText, { color: '#6d28d9', fontWeight: '600', marginLeft: 7 }]}>
+                            En proceso por: {ticket.nombre_tecnico || 'Técnico asignado'}
                         </Text>
                     </View>
-                </View>
-            )}
-            {ticket.ultima_reasignacion_motivo ? (
-                <Text style={{ fontSize: 12, color: '#d35400', marginTop: 4, fontStyle: 'italic' }}>
-                    🔄 Reasignado — Motivo: {ticket.ultima_reasignacion_motivo}
-                </Text>
-            ) : null}
-            {Number(ticket.cantidad_resolicitudes || 0) > 0 && ticket.estado !== 'FINALIZADA' ? (
-                <View style={{ marginTop: 8, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#fdecea', borderRadius: 6, borderLeftWidth: 3, borderLeftColor: '#e74c3c' }}>
-                    <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#c0392b' }}>
-                        ⚠️ Insistencia: El usuario de {ticket.oficina} {ticket.piso ? `(${ticket.piso})` : ''} requiere atención demorada ({ticket.cantidad_resolicitudes})
-                    </Text>
-                    {ticket.ultima_resolicitud_motivo ? (
-                        <Text style={{ fontSize: 12, color: '#922b21', marginTop: 2 }}>
-                            Motivo: "{ticket.ultima_resolicitud_motivo}"
+                ) : ticket.nombre_tecnico ? (
+                    <View style={styles.iconRowItem}>
+                        <AppIcon name="user" size={15} color="#1e3a8a" />
+                        <Text style={[styles.detailRowText, { marginLeft: 7 }]}>
+                            Técnico: <Text style={{ fontWeight: '600', color: '#1e3a8a' }}>{ticket.nombre_tecnico}</Text>
                         </Text>
-                    ) : null}
+                    </View>
+                ) : (
+                    <View style={styles.iconRowItem}>
+                        <AppIcon name="clock" size={15} color="#64748b" />
+                        <Text style={[styles.detailRowText, { color: '#64748b', marginLeft: 7 }]}>
+                            Esperando asignación de técnico
+                        </Text>
+                    </View>
+                )}
+
+                <View style={styles.iconRowItem}>
+                    <AppIcon name="pin" size={15} color="#475569" />
+                    <Text style={[styles.detailRowText, { marginLeft: 7 }]}>
+                        Ubicación: {ticket.oficina} — {ticket.piso}
+                    </Text>
                 </View>
-            ) : null}
+
+                {/* HORAS Y TIEMPOS EN TICKETS FINALIZADOS */}
+                {ticket.estado === 'FINALIZADA' && (
+                    <View style={styles.historyTimesBox}>
+                        <View style={styles.iconRowItem}>
+                            <AppIcon name="calendar" size={13} color="#1e40af" />
+                            <Text style={[styles.historyTimeItem, { marginLeft: 6 }]}>
+                                <Text style={{ fontWeight: 'bold', color: '#1e40af' }}>Asignado:</Text> {formatearFechaHora(ticket.fecha_asignacion)}
+                            </Text>
+                        </View>
+                        <View style={styles.iconRowItem}>
+                            <AppIcon name="play" size={13} color="#6d28d9" />
+                            <Text style={[styles.historyTimeItem, { marginLeft: 6 }]}>
+                                <Text style={{ fontWeight: 'bold', color: '#6d28d9' }}>En Proceso:</Text> {formatearFechaHora(ticket.fecha_inicio)}
+                            </Text>
+                        </View>
+                        <View style={styles.iconRowItem}>
+                            <AppIcon name="check" size={13} color="#15803d" />
+                            <Text style={[styles.historyTimeItem, { marginLeft: 6 }]}>
+                                <Text style={{ fontWeight: 'bold', color: '#15803d' }}>Finalizado:</Text> {formatearFechaHora(ticket.fecha_finalizacion)}
+                            </Text>
+                        </View>
+
+                        <View style={styles.metricsSummaryRow}>
+                            <View style={styles.iconRowItem}>
+                                <AppIcon name="clock" size={13} color="#1e40af" />
+                                <Text style={[styles.metricItemText, { marginLeft: 6 }]}>
+                                    <Text style={{ fontWeight: 'bold', color: '#1e40af' }}>1. Total desde Asignación:</Text>{' '}
+                                    <Text style={{ fontWeight: 'bold', color: '#0f172a' }}>{obtenerTiempoTotalAsignacion(ticket)}</Text>
+                                </Text>
+                            </View>
+                            <View style={styles.iconRowItem}>
+                                <AppIcon name="wrench" size={13} color="#6d28d9" />
+                                <Text style={[styles.metricItemText, { marginLeft: 6 }]}>
+                                    <Text style={{ fontWeight: 'bold', color: '#6d28d9' }}>2. Efectivo de trabajo:</Text>{' '}
+                                    <Text style={{ fontWeight: 'bold', color: '#0f172a' }}>{obtenerTiempoEfectivoTrabajo(ticket)}</Text>
+                                </Text>
+                            </View>
+                        </View>
+                    </View>
+                )}
+
+                {ticket.ultima_reasignacion_motivo ? (
+                    <View style={[styles.iconRowItem, { marginTop: 4 }]}>
+                        <AppIcon name="refresh" size={13} color="#d97706" />
+                        <Text style={[styles.reassignedText, { marginTop: 0, marginLeft: 6 }]}>
+                            Reasignado — Motivo: {ticket.ultima_reasignacion_motivo}
+                        </Text>
+                    </View>
+                ) : null}
+
+                {tieneInsistencia && (
+                    <View style={styles.insistenciaAlertBox}>
+                        <View style={styles.iconRowItem}>
+                            <AppIcon name="alert" size={14} color="#b91c1c" />
+                            <Text style={[styles.insistenciaAlertTitle, { marginLeft: 6, flex: 1 }]}>
+                                Insistencia: El usuario de {ticket.oficina} {ticket.piso ? `(${ticket.piso})` : ''} requiere atención demorada ({ticket.cantidad_resolicitudes})
+                            </Text>
+                        </View>
+                        {ticket.ultima_resolicitud_motivo ? (
+                            <Text style={styles.insistenciaAlertMotivo}>
+                                Motivo: "{ticket.ultima_resolicitud_motivo}"
+                            </Text>
+                        ) : null}
+                    </View>
+                )}
+            </View>
+
+            {/* 4. PIE DE TARJETA CON BOTÓN "Detalles" AZUL MARINO */}
+            <View style={styles.cardFooterRow}>
+                <TouchableOpacity
+                    style={styles.detailsButton}
+                    onPress={onPress}
+                    activeOpacity={0.8}
+                >
+                    <Text style={styles.detailsButtonText}>Detalles</Text>
+                </TouchableOpacity>
+            </View>
         </TouchableOpacity>
     );
 };
@@ -192,51 +265,155 @@ const styles = StyleSheet.create({
     card: {
         backgroundColor: '#ffffff',
         padding: 16,
-        borderRadius: 8,
-        marginBottom: 12,
-        elevation: 2,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-        borderLeftWidth: 4,
-        borderLeftColor: theme.colors.primary, // Línea azul lateral para darle estilo
+        borderRadius: 16,
+        marginBottom: 14,
+        elevation: 3,
+        shadowColor: '#0f172a',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.07,
+        shadowRadius: 8,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
     },
-    headerRow: {
+    topRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 8,
+        marginBottom: 12,
     },
-    ticketId: {
-        fontSize: 14,
-        fontWeight: 'bold',
-        color: theme.colors.primary,
+    badgesWrap: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: 6,
+        flex: 1,
+        marginRight: 8,
     },
-    title: {
-        fontSize: 16,
-        fontWeight: 'bold',
-        color: '#333',
-        marginBottom: 4,
-    },
-    subtitle: {
-        fontSize: 14,
-        color: '#666',
-    },
-    tecnicoText: {
-        fontSize: 13,
-        color: '#2980b9',
-        fontWeight: '600',
-        marginTop: 6,
-    },
-    badge: {
-        paddingHorizontal: 8,
+    softPill: {
+        paddingHorizontal: 10,
         paddingVertical: 4,
-        borderRadius: 4,
+        borderRadius: 8,
+        borderWidth: 1,
     },
-    badgeText: {
-        color: '#fff',
+    softPillText: {
+        fontSize: 10.5,
+        fontWeight: 'bold',
+        letterSpacing: 0.3,
+    },
+    ticketIdRight: {
+        fontSize: 12,
+        color: '#64748b',
+        fontWeight: '600',
+    },
+
+    mainHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 12,
+    },
+    avatarCircle: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#eff6ff',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+        borderWidth: 1,
+        borderColor: '#dbeafe',
+    },
+    officeTitle: {
+        fontSize: 15,
+        fontWeight: 'bold',
+        color: '#1e3a8a',
+        letterSpacing: 0.2,
+    },
+    floorSubtitle: {
+        fontSize: 12,
+        color: '#64748b',
+        marginTop: 2,
+        fontWeight: '500',
+    },
+
+    divider: {
+        height: 1,
+        backgroundColor: '#f1f5f9',
+        marginBottom: 10,
+    },
+
+    detailsList: {
+        gap: 6,
+    },
+    iconRowItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    detailRowText: {
+        fontSize: 13,
+        color: '#334155',
+    },
+    historyTimesBox: {
+        marginTop: 6,
+        paddingTop: 8,
+        borderTopWidth: 1,
+        borderTopColor: '#f1f5f9',
+        gap: 4,
+    },
+    historyTimeItem: {
+        fontSize: 12,
+        color: '#475569',
+    },
+    metricsSummaryRow: {
+        marginTop: 6,
+        paddingTop: 6,
+        borderTopWidth: 1,
+        borderTopColor: '#f8fafc',
+        gap: 3,
+    },
+    metricItemText: {
+        fontSize: 12,
+        color: '#475569',
+    },
+    reassignedText: {
+        fontSize: 12,
+        color: '#d97706',
+        marginTop: 4,
+        fontStyle: 'italic',
+    },
+    insistenciaAlertBox: {
+        marginTop: 6,
+        paddingVertical: 7,
+        paddingHorizontal: 10,
+        backgroundColor: '#fef2f2',
+        borderRadius: 8,
+        borderLeftWidth: 3,
+        borderLeftColor: '#ef4444',
+    },
+    insistenciaAlertTitle: {
         fontSize: 12,
         fontWeight: 'bold',
-    }
+        color: '#b91c1c',
+    },
+    insistenciaAlertMotivo: {
+        fontSize: 12,
+        color: '#991b1b',
+        marginTop: 2,
+    },
+
+    cardFooterRow: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        marginTop: 12,
+    },
+    detailsButton: {
+        backgroundColor: '#0f4c9c',
+        paddingHorizontal: 18,
+        paddingVertical: 8,
+        borderRadius: 10,
+    },
+    detailsButtonText: {
+        color: '#ffffff',
+        fontSize: 12.5,
+        fontWeight: 'bold',
+    },
 });

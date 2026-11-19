@@ -1,5 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform, Image } from 'react-native';
+import {
+    View,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    StyleSheet,
+    ActivityIndicator,
+    Alert,
+    Platform,
+    Image,
+    ScrollView,
+    KeyboardAvoidingView,
+} from 'react-native';
+import { useWindowDimensions, } from 'react-native';
 import { theme } from '../../../core/theme/theme';
 import { guardarItem, obtenerItem, eliminarItem } from '../../../core/utils/storage';
 import { login } from '../api/auth.service';
@@ -8,61 +21,117 @@ import { vincularTokenFCM } from '../api/auth.service';
 
 const STORAGE_KEY_CREDENCIALES = 'soporte_credenciales_recordadas';
 
-// Icono minimalista de Ojo (estilo Material / Feather Icons) dibujado con código puro
-// para que se vea limpio en Web y Android y funcione 100% aún sin conexión a internet
+// 1. Icono de Usuario con círculo (izquierda del campo Usuario)
+const IconoUsuarioInput = () => {
+    if (Platform.OS === 'web') {
+        return (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e5bb0" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <circle cx="12" cy="9" r="3" />
+                <path d="M6.7 19.3a6.5 6.5 0 0 1 10.6 0" />
+            </svg>
+        );
+    }
+    return (
+        <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 1.6, borderColor: '#1e5bb0', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, borderWidth: 1.4, borderColor: '#1e5bb0', marginTop: 2 }} />
+            <View style={{ width: 12, height: 6, borderTopLeftRadius: 6, borderTopRightRadius: 6, borderWidth: 1.4, borderColor: '#1e5bb0', marginTop: 2 }} />
+        </View>
+    );
+};
+
+// 2. Icono de Candado (izquierda del campo Contraseña)
+const IconoCandadoInput = () => {
+    if (Platform.OS === 'web') {
+        return (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e5bb0" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+        );
+    }
+    return (
+        <View style={{ width: 22, height: 22, justifyContent: 'center', alignItems: 'center' }}>
+            <View style={{ width: 10, height: 7, borderTopLeftRadius: 5, borderTopRightRadius: 5, borderWidth: 1.6, borderBottomWidth: 0, borderColor: '#1e5bb0', marginBottom: -1 }} />
+            <View style={{ width: 15, height: 11, borderRadius: 3, borderWidth: 1.6, borderColor: '#1e5bb0', justifyContent: 'center', alignItems: 'center' }}>
+                <View style={{ width: 2.5, height: 3.5, borderRadius: 1.5, backgroundColor: '#1e5bb0' }} />
+            </View>
+        </View>
+    );
+};
+
+// 3. Icono de Ojo (derecha del campo Contraseña)
 const IconoOjoMinimalista = ({ abierto }: { abierto: boolean }) => {
     if (Platform.OS === 'web') {
-        // En Web renderizamos el SVG estándar usado en formularios modernos (Feather eye / eye-off)
         return abierto ? (
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                <line x1="1" y1="1" x2="23" y2="23" />
-            </svg>
-        ) : (
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
                 <circle cx="12" cy="12" r="3" />
+            </svg>
+        ) : (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                <line x1="1" y1="1" x2="23" y2="23" />
             </svg>
         );
     }
 
-    // En Android / iOS dibujamos el icono vectorial con Views nativos (sin emojis ni red)
     return (
         <View style={{ width: 24, height: 18, justifyContent: 'center', alignItems: 'center' }}>
-            {/* Contorno del ojo */}
             <View
                 style={{
-                    width: 22,
-                    height: 13,
+                    width: 21,
+                    height: 12,
                     borderRadius: 10,
-                    borderWidth: 1.8,
+                    borderWidth: 1.7,
                     borderColor: '#64748b',
                     justifyContent: 'center',
                     alignItems: 'center',
                 }}
             >
-                {/* Pupila central */}
-                <View
-                    style={{
-                        width: 6,
-                        height: 6,
-                        borderRadius: 3,
-                        backgroundColor: '#64748b',
-                    }}
-                />
+                <View style={{ width: 5.5, height: 5.5, borderRadius: 3, backgroundColor: '#64748b' }} />
             </View>
-            {/* Línea diagonal cuando está en modo "Ocultar" (ojo tachado) */}
-            {abierto && (
+            {!abierto && (
                 <View
                     style={{
                         position: 'absolute',
-                        width: 24,
-                        height: 2,
+                        width: 23,
+                        height: 1.8,
                         backgroundColor: '#64748b',
                         transform: [{ rotate: '-35deg' }],
                     }}
                 />
             )}
+        </View>
+    );
+};
+
+// 4. Icono de Ingresar [->]
+const IconoIngresarBtn = () => {
+    if (Platform.OS === 'web') {
+        return (
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 8 }}>
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                <polyline points="10 17 15 12 10 7" />
+                <line x1="15" y1="12" x2="3" y2="12" />
+            </svg>
+        );
+    }
+    return (
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold', marginRight: -4 }}>→</Text>
+            <View
+                style={{
+                    width: 11,
+                    height: 16,
+                    borderTopWidth: 2,
+                    borderRightWidth: 2,
+                    borderBottomWidth: 2,
+                    borderColor: '#ffffff',
+                    borderTopRightRadius: 3,
+                    borderBottomRightRadius: 3,
+                }}
+            />
         </View>
     );
 };
@@ -74,7 +143,10 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
     const [recordarContrasena, setRecordarContrasena] = useState(false);
     const [cargando, setCargando] = useState(false);
 
-    // Cargar usuario y contraseña guardados si el usuario activó "Recordar contraseña"
+    const { height } = useWindowDimensions();
+    // En celular queda ~230px; en tablet crece proporcionalmente hasta 320px
+    const heroMinHeight = Math.max(230, Math.min(height * 0.30, 320));
+
     useEffect(() => {
         const cargarCredencialesRecordadas = async () => {
             try {
@@ -102,10 +174,8 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
 
         setCargando(true);
         try {
-            // 1. Iniciamos sesión en NestJS
             await login(usuario, contrasena);
 
-            // 1B. Guardar o limpiar las credenciales según el checkbox "Recordar contraseña"
             try {
                 if (recordarContrasena) {
                     await guardarItem(
@@ -119,22 +189,18 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
                 console.log('No se pudo actualizar credenciales recordadas:', errCred);
             }
 
-            // 2. Intentamos registrar notificaciones en un bloque INDEPENDIENTE
             try {
                 const tokenFCM = await registrarParaNotificacionesPush();
                 if (tokenFCM) {
-                    await vincularTokenFCM(tokenFCM).catch(e => console.log('Error vinculando token FCM', e));
+                    await vincularTokenFCM(tokenFCM).catch((e) => console.log('Error vinculando token FCM', e));
                 }
             } catch (notifError) {
-                // Si falla (como en Android Expo Go), lo silenciamos y el login continúa
-                console.warn("Notificaciones omitidas en este entorno:", notifError);
+                console.warn('Notificaciones omitidas en este entorno:', notifError);
             }
 
-            // 3. Avisamos al enrutador que ya tenemos token para cambiar a la Bandeja
             onLogin();
-
         } catch (error: any) {
-            console.error("Error detallado del servidor:", error);
+            console.error('Error detallado del servidor:', error);
             const mensajeError = error.response?.data?.message;
 
             const textoFinal = Array.isArray(mensajeError)
@@ -152,196 +218,370 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
     };
 
     return (
-        <View style={styles.container}>
-            {/* Tarjeta central blanca */}
-            <View style={styles.card}>
-                {/* Logo Oficial SSU La Paz */}
-                <View style={styles.logoContainer}>
-                    <Image
-                        source={require('../../../../assets/ssu-logo.png')}
-                        style={{ width: 200, height: 85 }}
-                        resizeMode="contain"
-                    />
-                </View>
-
-                <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Usuario</Text>
-                    <TextInput
-                        style={styles.input}
-                        placeholder="usuario@ssulapaz.org"
-                        value={usuario}
-                        onChangeText={setUsuario}
-                        autoCapitalize="none"
-                        keyboardType="email-address"
-                    />
-                </View>
-
-                <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Contraseña</Text>
-                    <View style={styles.passwordWrapper}>
-                        <TextInput
-                            style={styles.passwordInput}
-                            placeholder="••••••••"
-                            value={contrasena}
-                            onChangeText={setContrasena}
-                            secureTextEntry={!mostrarContrasena}
-                            autoCapitalize="none"
-                        />
-                        <TouchableOpacity
-                            style={styles.eyeButton}
-                            onPress={() => setMostrarContrasena((prev) => !prev)}
-                            activeOpacity={0.7}
-                        >
-                            <IconoOjoMinimalista abierto={mostrarContrasena} />
-                        </TouchableOpacity>
-                    </View>
-                </View>
-
-                {/* Checkbox para Recordar Contraseña (compatible con Android, iOS y Web) */}
-                <TouchableOpacity
-                    style={styles.rememberRow}
-                    onPress={() => setRecordarContrasena((prev) => !prev)}
-                    activeOpacity={0.7}
+        <View style={styles.root}>
+            <KeyboardAvoidingView
+                style={{ flex: 1 }}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+                <ScrollView
+                    contentContainerStyle={styles.scrollContent}
+                    keyboardShouldPersistTaps="handled"
+                    bounces={false}
                 >
-                    <View style={[styles.checkbox, recordarContrasena && styles.checkboxChecked]}>
-                        {recordarContrasena && <Text style={styles.checkboxMark}>✓</Text>}
+                    {/* BLOQUE SUPERIOR AGRUPADO: así la tarjeta nunca se despega de la cabecera */}
+                    <View>
+                        {/* 1. CABECERA AZUL CON ALTURA RESPONSIVA */}
+                        <View style={[styles.heroHeader, { minHeight: heroMinHeight }]}>
+                            <View style={styles.heroGlowCircle1} />
+                            <View style={styles.heroGlowCircle2} />
+
+                            <Image
+                                source={require('../../../../assets/7.png')}
+                                style={styles.heroLogoWhite}
+                                resizeMode="contain"
+                            />
+                            <Text style={styles.heroSubtitle}>Sistema de Gestión de Soporte</Text>
+
+                            <Image
+                                source={require('../../../../assets/ondas-superiores.png')}
+                                style={styles.topWaveImage}
+                                resizeMode="stretch"
+                            />
+                        </View>
+
+                        {/* 2. TARJETA FLOTANTE DE INICIO DE SESIÓN */}
+                        <View style={styles.cardWrapper}>
+                            <View style={styles.card}>
+                                <Text style={styles.cardTitle}>Iniciar sesión</Text>
+                                <Text style={styles.cardSubtitle}>
+                                    Accede a tu cuenta para gestionar soportes técnicos
+                                </Text>
+
+                                {/* CAMPO USUARIO (PÍLDORA REDONDEADA CON ICONO Y BOTÓN X) */}
+                                <View style={styles.pillInputWrapper}>
+                                    <View style={styles.leftIconBox}>
+                                        <IconoUsuarioInput />
+                                    </View>
+                                    <TextInput
+                                        style={styles.pillInput}
+                                        placeholder="Usuario o correo institucional"
+                                        placeholderTextColor="#94a3b8"
+                                        value={usuario}
+                                        onChangeText={setUsuario}
+                                        autoCapitalize="none"
+                                        keyboardType="email-address"
+                                    />
+                                    {usuario.length > 0 && (
+                                        <TouchableOpacity
+                                            style={styles.rightActionBox}
+                                            onPress={() => setUsuario('')}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Text style={styles.clearBtnText}>✕</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+
+                                {/* CAMPO CONTRASEÑA (PÍLDORA REDONDEADA CON CANDADO Y OJO) */}
+                                <View style={styles.pillInputWrapper}>
+                                    <View style={styles.leftIconBox}>
+                                        <IconoCandadoInput />
+                                    </View>
+                                    <TextInput
+                                        style={styles.pillInput}
+                                        placeholder="••••••••"
+                                        placeholderTextColor="#94a3b8"
+                                        value={contrasena}
+                                        onChangeText={setContrasena}
+                                        secureTextEntry={!mostrarContrasena}
+                                        autoCapitalize="none"
+                                    />
+                                    <TouchableOpacity
+                                        style={styles.rightActionBox}
+                                        onPress={() => setMostrarContrasena((prev) => !prev)}
+                                        activeOpacity={0.7}
+                                    >
+                                        <IconoOjoMinimalista abierto={mostrarContrasena} />
+                                    </TouchableOpacity>
+                                </View>
+
+                                {/* BOTÓN INGRESAR TIPO PÍLDORA AZUL */}
+                                <TouchableOpacity
+                                    style={styles.loginButton}
+                                    onPress={handleLogin}
+                                    disabled={cargando}
+                                    activeOpacity={0.85}
+                                >
+                                    {cargando ? (
+                                        <ActivityIndicator color="#ffffff" />
+                                    ) : (
+                                        <View style={styles.loginButtonInner}>
+                                            <Text style={styles.loginButtonText}>INGRESAR</Text>
+                                            <IconoIngresarBtn />
+                                        </View>
+                                    )}
+                                </TouchableOpacity>
+
+                                {/* CHECKBOX "Recordarme" DEBAJO DEL BOTÓN */}
+                                <TouchableOpacity
+                                    style={styles.rememberRow}
+                                    onPress={() => setRecordarContrasena((prev) => !prev)}
+                                    activeOpacity={0.7}
+                                >
+                                    <View style={[styles.checkbox, recordarContrasena && styles.checkboxChecked]}>
+                                        {recordarContrasena && <Text style={styles.checkboxMark}>✓</Text>}
+                                    </View>
+                                    <Text style={styles.rememberText}>Recordarme</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
                     </View>
-                    <Text style={styles.rememberText}>Recordar usuario y contraseña</Text>
-                </TouchableOpacity>
 
-                <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={cargando}>
-                    {cargando ? (
-                        <ActivityIndicator color={theme.colors.surface} />
-                    ) : (
-                        <Text style={styles.buttonText}>INGRESAR</Text>
-                    )}
-                </TouchableOpacity>
-            </View>
+                    {/* 3. PIE CON LOGO SigHov2 (4.jpeg) + "móvil" */}
+                    <View style={styles.footerBrandContainer}>
+                        <View style={{ alignItems: 'flex-end' }}>
+                            <Image
+                                source={require('../../../../assets/4.jpeg')}
+                                style={styles.sighoLogo}
+                                resizeMode="contain"
+                            />
+                            <Text style={styles.movilSubtext}>móvil</Text>
+                        </View>
+                    </View>
 
-            <Text style={styles.footerText}>SigHov2 móvil</Text>
+                    {/* 4. FORMAS ONDULADAS CELESTES EN LA PARTE INFERIOR (debajo del logotipo SigHov2) */}
+                    <View style={styles.bottomWavesContainer} pointerEvents="none">
+                        <Image
+                            source={require('../../../../assets/ondas-inferiores.png')}
+                            style={styles.bottomWaveImage}
+                            resizeMode="stretch"
+                        />
+                    </View>
+                </ScrollView>
+            </KeyboardAvoidingView>
         </View>
     );
 };
 
 const styles = StyleSheet.create({
-    container: {
+    root: {
         flex: 1,
-        backgroundColor: theme.colors.primary,
-        justifyContent: 'center',
+        backgroundColor: '#f8fafc',
+    },
+    scrollContent: {
+        flexGrow: 1,
+        justifyContent: 'space-between',
+        backgroundColor: '#f8fafc',
+    },
+
+    // CABECERA AZUL INSTITUCIONAL
+    heroHeader: {
+        backgroundColor: '#164a96',
+        paddingTop: Platform.OS === 'web' ? 38 : 54,
+        paddingBottom: 66,
         alignItems: 'center',
-        padding: theme.spacing.lg,
+        justifyContent: 'center',
+        position: 'relative',
+        overflow: 'hidden',
+    },
+    heroGlowCircle1: {
+        position: 'absolute',
+        width: 280,
+        height: 280,
+        borderRadius: 140,
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        top: -80,
+        left: -60,
+    },
+    heroGlowCircle2: {
+        position: 'absolute',
+        width: 240,
+        height: 240,
+        borderRadius: 120,
+        backgroundColor: 'rgba(56, 189, 248, 0.09)',
+        bottom: -50,
+        right: -40,
+    },
+    heroLogoWhite: {
+        width: 195,
+        height: 82,
+    },
+    heroSubtitle: {
+        color: '#e0f2fe',
+        fontSize: 13,
+        fontWeight: '600',
+        marginTop: 6,
+        letterSpacing: 0.3,
+    },
+    topWaveImage: {
+        position: 'absolute',
+        bottom: -2,
+        left: 0,
+        right: 0,
+        width: '100%',
+        height: 54,
+    },
+
+    // TARJETA CENTRAL
+    cardWrapper: {
+        paddingHorizontal: 20,
+        marginTop: -22,
+        zIndex: 5,
     },
     card: {
-        backgroundColor: theme.colors.surface,
+        backgroundColor: '#ffffff',
         width: '100%',
-        maxWidth: 440,
+        maxWidth: 430,
         alignSelf: 'center',
-        borderRadius: theme.borderRadius.lg,
-        padding: theme.spacing.lg,
-        ...theme.shadows.card,
-    },
-    logoContainer: {
-        alignItems: 'center',
-        marginBottom: theme.spacing.xl,
-    },
-    logoText: {
-        fontSize: 40,
-        fontWeight: 'bold',
-        color: theme.colors.primary,
-    },
-    logoSubText: {
-        fontSize: 16,
-        color: theme.colors.textSecondary,
-        letterSpacing: 2,
-    },
-    inputContainer: {
-        marginBottom: theme.spacing.md,
-    },
-    label: {
-        fontSize: theme.typography.sizes.sm,
-        color: theme.colors.textSecondary,
-        marginBottom: theme.spacing.xs,
-        marginLeft: 4,
-    },
-    input: {
+        borderRadius: 20,
+        paddingHorizontal: 22,
+        paddingVertical: 24,
+        elevation: 6,
+        shadowColor: '#0f172a',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.1,
+        shadowRadius: 14,
         borderWidth: 1,
-        borderColor: theme.colors.border,
-        borderRadius: theme.borderRadius.md,
-        padding: theme.spacing.md,
-        fontSize: theme.typography.sizes.md,
-        color: theme.colors.textPrimary,
+        borderColor: '#f1f5f9',
     },
-    passwordWrapper: {
+    cardTitle: {
+        fontSize: 19,
+        fontWeight: 'bold',
+        color: '#0f294a',
+        textAlign: 'center',
+    },
+    cardSubtitle: {
+        fontSize: 12.5,
+        color: '#64748b',
+        textAlign: 'center',
+        marginTop: 4,
+        marginBottom: 20,
+    },
+
+    // INPUTS EN FORMA DE PÍLDORA
+    pillInputWrapper: {
         flexDirection: 'row',
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: theme.colors.border,
-        borderRadius: theme.borderRadius.md,
-        backgroundColor: '#fff',
-    },
-    passwordInput: {
-        flex: 1,
-        padding: theme.spacing.md,
-        fontSize: theme.typography.sizes.md,
-        color: theme.colors.textPrimary,
-    },
-    eyeButton: {
+        borderColor: '#cbd5e1',
+        borderRadius: 28,
+        backgroundColor: '#ffffff',
+        height: 50,
+        marginBottom: 14,
         paddingHorizontal: 14,
-        paddingVertical: 10,
+    },
+    leftIconBox: {
+        marginRight: 10,
         justifyContent: 'center',
         alignItems: 'center',
     },
-    eyeIcon: {
-        fontSize: 18,
+    pillInput: {
+        flex: 1,
+        fontSize: 14.5,
+        color: '#1e293b',
+        paddingVertical: 8,
     },
+    rightActionBox: {
+        paddingLeft: 10,
+        paddingVertical: 8,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    clearBtnText: {
+        fontSize: 15,
+        color: '#475569',
+        fontWeight: 'bold',
+    },
+
+    // BOTÓN INGRESAR
+    loginButton: {
+        backgroundColor: '#1d5bbf',
+        height: 48,
+        borderRadius: 26,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginTop: 4,
+        elevation: 3,
+        shadowColor: '#1d5bbf',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.28,
+        shadowRadius: 6,
+    },
+    loginButtonInner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    loginButtonText: {
+        color: '#ffffff',
+        fontWeight: 'bold',
+        fontSize: 14.5,
+        letterSpacing: 0.6,
+    },
+
+    // CHECKBOX RECORDARME
     rememberRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: 2,
-        marginBottom: 8,
+        marginTop: 14,
         paddingVertical: 4,
+        alignSelf: 'flex-start',
     },
     checkbox: {
-        width: 22,
-        height: 22,
-        borderRadius: 5,
+        width: 19,
+        height: 19,
+        borderRadius: 4,
         borderWidth: 1.5,
-        borderColor: theme.colors.primary,
-        backgroundColor: '#fff',
+        borderColor: '#1d68d8',
+        backgroundColor: '#ffffff',
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: 10,
+        marginRight: 8,
     },
     checkboxChecked: {
-        backgroundColor: theme.colors.primary,
+        backgroundColor: '#1d68d8',
     },
     checkboxMark: {
         color: '#ffffff',
-        fontSize: 14,
+        fontSize: 12,
         fontWeight: 'bold',
-        lineHeight: 16,
+        lineHeight: 14,
     },
     rememberText: {
-        fontSize: 14,
-        color: theme.colors.textPrimary,
+        fontSize: 12.5,
+        color: '#475569',
         fontWeight: '500',
     },
-    button: {
-        backgroundColor: theme.colors.primary,
-        padding: theme.spacing.md,
-        borderRadius: theme.borderRadius.md,
+
+    // LOGO INFERIOR SigHov2 móvil
+    footerBrandContainer: {
         alignItems: 'center',
-        marginTop: theme.spacing.md,
+        justifyContent: 'center',
+        marginTop: 26,
+        marginBottom: 16,
     },
-    buttonText: {
-        color: theme.colors.textLight,
-        fontWeight: 'bold',
-        fontSize: theme.typography.sizes.md,
+    sighoLogo: {
+        width: 185,
+        height: 48,
     },
-    footerText: {
-        color: theme.colors.textLight,
-        marginTop: 40,
-        fontSize: theme.typography.sizes.xl,
-        fontWeight: 'bold',
-    }
+    movilSubtext: {
+        fontSize: 14,
+        color: '#1e4e8c',
+        fontStyle: 'italic',
+        fontWeight: '500',
+        marginTop: -2,
+        marginRight: 6,
+    },
+
+    // ONDAS INFERIORES CELESTES
+    bottomWavesContainer: {
+        height: 82,
+        width: '100%',
+        justifyContent: 'flex-end',
+        overflow: 'hidden',
+    },
+    bottomWaveImage: {
+        width: '100%',
+        height: 82,
+    },
 });

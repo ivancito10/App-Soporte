@@ -9,6 +9,7 @@ import {
     Platform,
 } from 'react-native';
 import { theme } from '../theme/theme';
+import { AppIcon, NombreIcono } from './AppIcon';
 
 interface MenuLateralModalProps {
     visible: boolean;
@@ -21,33 +22,33 @@ interface MenuLateralModalProps {
 
 const INFO_ROLES: Record<
     string,
-    { titulo: string; subtitulo: string; icono: string; color: string; bg: string }
+    { titulo: string; subtitulo: string; icono: NombreIcono; color: string; bg: string }
 > = {
     OPERADOR: {
         titulo: 'Bandeja de Operador',
         subtitulo: 'Recibir solicitudes, asignar prioridad y derivar a técnicos',
-        icono: '🎧',
+        icono: 'headset',
         color: '#2980b9',
         bg: '#ebf5fb',
     },
     ADMINISTRADOR: {
         titulo: 'Gestión de Roles (Admin)',
         subtitulo: 'Otorgar o quitar permisos al personal del sistema',
-        icono: '🛡️',
+        icono: 'shield',
         color: '#d35400',
         bg: '#fef5e7',
     },
     TECNICO: {
         titulo: 'Bandeja de Técnico',
         subtitulo: 'Atender soportes asignados, cronometrar y subir actas',
-        icono: '🧑‍🔧',
+        icono: 'wrench',
         color: '#8e44ad',
         bg: '#f5eef8',
     },
     USUARIO: {
         titulo: 'Mis Solicitudes (Usuario)',
         subtitulo: 'Solicitar soporte técnico y hacer seguimiento',
-        icono: '👤',
+        icono: 'user',
         color: '#27ae60',
         bg: '#eafaf1',
     },
@@ -101,7 +102,7 @@ export const MenuLateralModal = ({
                             const info = INFO_ROLES[rolKey] || {
                                 titulo: `Modo ${rolKey}`,
                                 subtitulo: 'Acceder a la vista de este rol',
-                                icono: '🔹',
+                                icono: 'user' as NombreIcono,
                                 color: theme.colors.primary,
                                 bg: '#eef2f9',
                             };
@@ -124,9 +125,12 @@ export const MenuLateralModal = ({
                                     activeOpacity={0.75}
                                 >
                                     <View style={styles.roleHeaderRow}>
-                                        <Text style={[styles.roleTitle, { color: esActivo ? info.color : '#2c3e50' }]}>
-                                            {info.icono}  {info.titulo}
-                                        </Text>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 6 }}>
+                                            <AppIcon name={info.icono} size={17} color={esActivo ? info.color : '#2c3e50'} />
+                                            <Text style={[styles.roleTitle, { color: esActivo ? info.color : '#2c3e50', marginLeft: 8, marginRight: 0 }]}>
+                                                {info.titulo}
+                                            </Text>
+                                        </View>
                                         {esActivo && (
                                             <View style={[styles.activePill, { backgroundColor: info.color }]}>
                                                 <Text style={styles.activePillText}>ACTIVO</Text>
@@ -143,13 +147,14 @@ export const MenuLateralModal = ({
                     <View style={styles.drawerFooter}>
                         {onLogout && (
                             <TouchableOpacity
-                                style={styles.logoutDrawerBtn}
+                                style={[styles.logoutDrawerBtn, { flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
                                 onPress={() => {
                                     onClose();
                                     onLogout();
                                 }}
                             >
-                                <Text style={styles.logoutDrawerText}>🚪 Cerrar Sesión</Text>
+                                <AppIcon name="logout" size={16} color="#c0392b" />
+                                <Text style={styles.logoutDrawerText}>Cerrar Sesión</Text>
                             </TouchableOpacity>
                         )}
                     </View>

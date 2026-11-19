@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ActivityInd
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { theme } from '../../../core/theme/theme';
+import { AppIcon, NombreIcono } from '../../../core/components/AppIcon';
 import { RolBandeja, TicketSoporte } from '../types/soporte.types';
 import {
     resolicitarSoporte,
@@ -19,11 +20,11 @@ import {
     obtenerBandeja
 } from '../api/soporte.service';
 
-// Opciones de tipos de soporte para el modal
-const TIPOS_SOPORTE = [
-    { id: 1, icono: '💻', titulo: 'Equipos físicos' },
-    { id: 2, icono: '⚙️', titulo: 'Sistema SIGHO' },
-    { id: 3, icono: '🌐', titulo: 'Redes e Internet' },
+// Opciones de tipos de soporte para el modal (con iconos vectoriales sin emojis)
+const TIPOS_SOPORTE: Array<{ id: number; icono: NombreIcono; titulo: string }> = [
+    { id: 1, icono: 'laptop', titulo: 'Equipos físicos' },
+    { id: 2, icono: 'gear', titulo: 'Sistema SIGHO' },
+    { id: 3, icono: 'globe', titulo: 'Redes e Internet' },
 ];
 
 // Niveles de prioridad seleccionables por el Operador (usamos puntos de color View nativos para evitar el bug de recorte de emojis 🟠🟢 en fuentes personalizadas de Android)
@@ -43,13 +44,13 @@ const formatearFechaHora = (fechaIso?: string) => {
     return `${fecha} — ${hora}`;
 };
 
-// Función auxiliar para mostrar el texto en lugar del ID numérico
-const obtenerNombreSoporte = (idTipo: number | string) => {
+// Función auxiliar para mostrar el texto e icono en lugar del ID numérico
+const obtenerInfoTipoSoporte = (idTipo: number | string): { icono: NombreIcono; nombre: string } => {
     const id = Number(idTipo);
-    if (id === 1) return '💻 Equipos físicos';
-    if (id === 2) return '⚙️ Sistema SIGHO';
-    if (id === 3) return '🌐 Redes e Internet';
-    return 'Otro';
+    if (id === 1) return { icono: 'laptop', nombre: 'Equipos físicos' };
+    if (id === 2) return { icono: 'gear', nombre: 'Sistema SIGHO' };
+    if (id === 3) return { icono: 'globe', nombre: 'Redes e Internet' };
+    return { icono: 'wrench', nombre: 'Otro' };
 };
 
 // Función auxiliar para formatear segundos en "Xh Ym Zs" o "Ym Zs"
@@ -471,15 +472,21 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                     );
                 })()}
                 {estadoActual === 'EN_PROCESO' && (
-                    <Text style={{ marginTop: 6, color: '#8e44ad', fontWeight: 'bold', fontSize: 14 }}>
-                        🛠️ En proceso por el técnico: {ticket.nombre_tecnico || 'Técnico asignado'}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
+                        <AppIcon name="wrench" size={15} color="#8e44ad" />
+                        <Text style={{ marginLeft: 6, color: '#8e44ad', fontWeight: 'bold', fontSize: 14 }}>
+                            En proceso por el técnico: {ticket.nombre_tecnico || 'Técnico asignado'}
+                        </Text>
+                    </View>
                 )}
                 {ticket.ultima_reasignacion_motivo && (
                     <View style={{ marginTop: 10, padding: 10, backgroundColor: '#fff8e1', borderRadius: 6, borderLeftWidth: 4, borderLeftColor: '#f39c12' }}>
-                        <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#d35400' }}>
-                            🔄 Ticket Reasignado / Derivado
-                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <AppIcon name="refresh" size={14} color="#d35400" />
+                            <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#d35400', marginLeft: 6 }}>
+                                Ticket Reasignado / Derivado
+                            </Text>
+                        </View>
                         <Text style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
                             Motivo: {ticket.ultima_reasignacion_motivo}
                         </Text>
@@ -487,9 +494,12 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                 )}
                 {Number(ticket.cantidad_resolicitudes || 0) > 0 && estadoActual !== 'FINALIZADA' && (
                     <View style={{ marginTop: 10, padding: 10, backgroundColor: '#fdecea', borderRadius: 6, borderLeftWidth: 4, borderLeftColor: '#e74c3c' }}>
-                        <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#c0392b' }}>
-                            ⚠️ Insistencia: El usuario de {ticket.oficina} {ticket.piso ? `(${ticket.piso})` : ''} requiere atención demorada
-                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <AppIcon name="alert" size={14} color="#c0392b" />
+                            <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#c0392b', marginLeft: 6, flex: 1 }}>
+                                Insistencia: El usuario de {ticket.oficina} {ticket.piso ? `(${ticket.piso})` : ''} requiere atención demorada
+                            </Text>
+                        </View>
                         {ticket.ultima_resolicitud_motivo && (
                             <Text style={{ fontSize: 13, color: '#922b21', marginTop: 2 }}>
                                 Mensaje del usuario: "{ticket.ultima_resolicitud_motivo}"
@@ -506,12 +516,18 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                 {cargandoItems ? (
                     <ActivityIndicator size="small" color={theme.colors.primary} style={{ marginTop: 10 }} />
                 ) : itemsProblema.length > 0 ? (
-                    itemsProblema.map((item, index) => (
-                        <View key={index} style={styles.itemBox}>
-                            <Text style={styles.itemType}>{obtenerNombreSoporte(item.id_tipo_soporte)}</Text>
-                            <Text style={styles.itemDesc}>{item.descripcion}</Text>
-                        </View>
-                    ))
+                    itemsProblema.map((item, index) => {
+                        const infoTipo = obtenerInfoTipoSoporte(item.id_tipo_soporte);
+                        return (
+                            <View key={index} style={styles.itemBox}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                    <AppIcon name={infoTipo.icono} size={17} color="#164a96" />
+                                    <Text style={[styles.itemType, { marginBottom: 0, marginLeft: 7 }]}>{infoTipo.nombre}</Text>
+                                </View>
+                                <Text style={styles.itemDesc}>{item.descripcion}</Text>
+                            </View>
+                        );
+                    })
                 ) : (
                     <Text style={styles.emptyItemsText}>No se pudieron cargar los detalles del problema.</Text>
                 )}
@@ -529,8 +545,15 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                         multiline
                     />
 
-                    <TouchableOpacity style={[styles.button, { backgroundColor: '#e67e22' }]} onPress={handleResolicitar} disabled={cargando}>
-                        {cargando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>🔔 Re-solicitar / Insistir</Text>}
+                    <TouchableOpacity style={[styles.button, { backgroundColor: '#e67e22', flexDirection: 'row', justifyContent: 'center', gap: 8 }]} onPress={handleResolicitar} disabled={cargando}>
+                        {cargando ? (
+                            <ActivityIndicator color="#FFF" />
+                        ) : (
+                            <>
+                                <AppIcon name="bell" size={17} color="#ffffff" />
+                                <Text style={styles.buttonText}>Re-solicitar / Insistir</Text>
+                            </>
+                        )}
                     </TouchableOpacity>
 
                     {/* BOTÓN QUE ABRE EL MODAL */}
@@ -546,7 +569,10 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             {/* 2A. Vista de OPERADOR: Primera asignación (Ticket PENDIENTE) */}
             {rolUsuario === RolBandeja.OPERADOR && ticket.estado === 'PENDIENTE' && (
                 <View style={styles.actionSection}>
-                    <Text style={styles.sectionTitle}>👨‍🔧 Asignar a Técnico</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                        <AppIcon name="user" size={18} color="#333" />
+                        <Text style={[styles.sectionTitle, { marginBottom: 0, marginLeft: 7 }]}>Asignar a Técnico</Text>
+                    </View>
 
                     <Text style={styles.label}>Selecciona el nivel de prioridad:</Text>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -594,12 +620,14 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                     key={tec.id}
                                     style={[
                                         styles.itemBox,
+                                        { flexDirection: 'row', alignItems: 'center' },
                                         idTecnico === tec.id && { borderColor: theme.colors.primary, backgroundColor: '#eef2f9' }
                                     ]}
                                     onPress={() => setIdTecnico(tec.id)}
                                 >
-                                    <Text style={{ fontWeight: 'bold', color: idTecnico === tec.id ? theme.colors.primary : '#333' }}>
-                                        🧑‍🔧 {tec.nombre}
+                                    <AppIcon name="user" size={16} color={idTecnico === tec.id ? theme.colors.primary : '#333'} />
+                                    <Text style={{ fontWeight: 'bold', color: idTecnico === tec.id ? theme.colors.primary : '#333', marginLeft: 8 }}>
+                                        {tec.nombre}
                                     </Text>
                                 </TouchableOpacity>
                             ))}
@@ -607,11 +635,18 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                     )}
 
                     <TouchableOpacity
-                        style={[styles.button, { backgroundColor: theme.colors.primary, opacity: idTecnico ? 1 : 0.5 }]}
+                        style={[styles.button, { backgroundColor: theme.colors.primary, opacity: idTecnico ? 1 : 0.5, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
                         onPress={handleAsignar}
                         disabled={cargando || !idTecnico}
                     >
-                        {cargando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>➡️ Asignar Ticket</Text>}
+                        {cargando ? (
+                            <ActivityIndicator color="#FFF" />
+                        ) : (
+                            <>
+                                <Text style={styles.buttonText}>Asignar Ticket</Text>
+                                <AppIcon name="arrow-right" size={18} color="#ffffff" />
+                            </>
+                        )}
                     </TouchableOpacity>
                 </View>
             )}
@@ -619,12 +654,18 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             {/* 2B. Vista de OPERADOR: Reasignar Técnico (Ticket ASIGNADA pero aún no EN_PROCESO) */}
             {rolUsuario === RolBandeja.OPERADOR && ticket.estado === 'ASIGNADA' && (
                 <View style={styles.actionSection}>
-                    <Text style={styles.sectionTitle}>🔄 Reasignar a otro Técnico</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                        <AppIcon name="refresh" size={18} color="#333" />
+                        <Text style={[styles.sectionTitle, { marginBottom: 0, marginLeft: 7 }]}>Reasignar a otro Técnico</Text>
+                    </View>
 
                     <View style={[styles.itemBox, { backgroundColor: '#eef7fc', borderColor: '#3498db', marginBottom: 14 }]}>
-                        <Text style={{ fontSize: 13, color: '#2980b9', fontWeight: 'bold' }}>
-                            🧑‍🔧 Técnico asignado actualmente: {ticket.nombre_tecnico || 'Técnico'}
-                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <AppIcon name="user" size={15} color="#2980b9" />
+                            <Text style={{ fontSize: 13, color: '#2980b9', fontWeight: 'bold', marginLeft: 6 }}>
+                                Técnico asignado actualmente: {ticket.nombre_tecnico || 'Técnico'}
+                            </Text>
+                        </View>
                         <Text style={{ fontSize: 12, color: '#555', marginTop: 4 }}>
                             El técnico aún no ha puesto el soporte en proceso. Si necesitas cambiarlo, indica el motivo y selecciona al nuevo técnico:
                         </Text>
@@ -688,13 +729,15 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                         disabled={Boolean(esActual)}
                                         style={[
                                             styles.itemBox,
+                                            { flexDirection: 'row', alignItems: 'center' },
                                             esActual && { opacity: 0.5, backgroundColor: '#eee' },
                                             idTecnico === tec.id && { borderColor: theme.colors.primary, backgroundColor: '#eef2f9' }
                                         ]}
                                         onPress={() => setIdTecnico(tec.id)}
                                     >
-                                        <Text style={{ fontWeight: 'bold', color: idTecnico === tec.id ? theme.colors.primary : '#333' }}>
-                                            🧑‍🔧 {tec.nombre} {esActual ? '(Asignado actualmente)' : ''}
+                                        <AppIcon name="user" size={16} color={idTecnico === tec.id ? theme.colors.primary : '#333'} />
+                                        <Text style={{ fontWeight: 'bold', color: idTecnico === tec.id ? theme.colors.primary : '#333', marginLeft: 8 }}>
+                                            {tec.nombre} {esActual ? '(Asignado actualmente)' : ''}
                                         </Text>
                                     </TouchableOpacity>
                                 );
@@ -707,13 +750,23 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                             styles.button,
                             {
                                 backgroundColor: '#e67e22',
-                                opacity: idTecnico && justificacionReasignacion.trim() ? 1 : 0.5
+                                opacity: idTecnico && justificacionReasignacion.trim() ? 1 : 0.5,
+                                flexDirection: 'row',
+                                justifyContent: 'center',
+                                gap: 8,
                             }
                         ]}
                         onPress={handleReasignarOperador}
                         disabled={cargando || !idTecnico || !justificacionReasignacion.trim()}
                     >
-                        {cargando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>🔄 Confirmar Reasignación</Text>}
+                        {cargando ? (
+                            <ActivityIndicator color="#FFF" />
+                        ) : (
+                            <>
+                                <AppIcon name="refresh" size={17} color="#ffffff" />
+                                <Text style={styles.buttonText}>Confirmar Reasignación</Text>
+                            </>
+                        )}
                     </TouchableOpacity>
                 </View>
             )}
@@ -721,7 +774,10 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             {/* 2C. Vista de OPERADOR: Bloqueado cuando el técnico ya puso el soporte EN_PROCESO */}
             {rolUsuario === RolBandeja.OPERADOR && ticket.estado === 'EN_PROCESO' && (
                 <View style={[styles.actionSection, { borderLeftWidth: 4, borderLeftColor: '#8e44ad' }]}>
-                    <Text style={[styles.sectionTitle, { color: '#8e44ad' }]}>🛠️ Soporte En Proceso</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                        <AppIcon name="wrench" size={18} color="#8e44ad" />
+                        <Text style={[styles.sectionTitle, { color: '#8e44ad', marginBottom: 0, marginLeft: 7 }]}>Soporte En Proceso</Text>
+                    </View>
                     <Text style={{ color: '#444', fontSize: 14, lineHeight: 20 }}>
                         Este soporte está siendo atendido actualmente por el técnico{' '}
                         <Text style={{ fontWeight: 'bold', color: '#8e44ad' }}>
@@ -735,19 +791,22 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             {/* NUEVO: VISTA DE HISTORIAL PARA OPERADOR Y TÉCNICO (Tickets Concluidos) */}
             {(rolUsuario === RolBandeja.OPERADOR || rolUsuario === RolBandeja.TECNICO) && estadoActual === 'FINALIZADA' && (
                 <View style={styles.actionSection}>
-                    <Text style={styles.sectionTitle}>📋 Acta de Soporte (Historial Concluido)</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                        <AppIcon name="clipboard" size={18} color="#333" />
+                        <Text style={[styles.sectionTitle, { marginBottom: 0, marginLeft: 7 }]}>Acta de Soporte (Historial Concluido)</Text>
+                    </View>
 
                     <View style={styles.itemBox}>
                         <Text style={styles.label}>Técnico Asignado:</Text>
                         <Text style={{ marginBottom: 10, color: '#333', fontWeight: 'bold' }}>{ticket.nombre_tecnico || 'Técnico'}</Text>
 
-                        <Text style={styles.label}>📌 Hora de Asignación:</Text>
+                        <Text style={styles.label}>Hora de Asignación:</Text>
                         <Text style={{ marginBottom: 10, color: '#2980b9', fontWeight: 'bold' }}>{formatearFechaHora(ticket.fecha_asignacion)}</Text>
 
-                        <Text style={styles.label}>▶️ Hora de Inicio En Proceso:</Text>
+                        <Text style={styles.label}>Hora de Inicio En Proceso:</Text>
                         <Text style={{ marginBottom: 10, color: '#8e44ad', fontWeight: 'bold' }}>{formatearFechaHora(ticket.fecha_inicio)}</Text>
 
-                        <Text style={styles.label}>✅ Hora de Finalización:</Text>
+                        <Text style={styles.label}>Hora de Finalización:</Text>
                         <Text style={{ marginBottom: 10, color: '#27ae60', fontWeight: 'bold' }}>{formatearFechaHora(ticket.fecha_finalizacion)}</Text>
 
                         <Text style={styles.label}>1. Tiempo total desde Asignación:</Text>
@@ -761,7 +820,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                     </View>
 
                     <TouchableOpacity
-                        style={[styles.button, { backgroundColor: '#27ae60', marginTop: 10 }]}
+                        style={[styles.button, { backgroundColor: '#27ae60', marginTop: 10, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
                         onPress={async () => {
                             let ruta = rutaActaGuardada || ticket.url_acta || null;
                             if (!ruta && idReal) {
@@ -787,7 +846,8 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                             }
                         }}
                     >
-                        <Text style={styles.buttonText}>📄 Ver Acta Adjunta</Text>
+                        <AppIcon name="document" size={17} color="#ffffff" />
+                        <Text style={styles.buttonText}>Ver Acta Adjunta</Text>
                     </TouchableOpacity>
                 </View>
             )}
@@ -795,7 +855,10 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             {/* 3. Vista de TÉCNICO */}
             {rolUsuario === RolBandeja.TECNICO && estadoActual !== 'FINALIZADA' && (
                 <View style={styles.actionSection}>
-                    <Text style={styles.sectionTitle}>⏱️ Tiempos del Soporte (En Vivo)</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                        <AppIcon name="clock" size={18} color="#333" />
+                        <Text style={[styles.sectionTitle, { marginBottom: 0, marginLeft: 7 }]}>Tiempos del Soporte (En Vivo)</Text>
+                    </View>
 
                     <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
                         {/* CRONÓMETRO 1: Desde fecha_asignacion */}
@@ -803,9 +866,12 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                             <Text style={{ fontSize: 12, color: '#2980b9', textAlign: 'center', fontWeight: '600' }}>
                                 1. Desde Asignación
                             </Text>
-                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#2980b9', marginTop: 6 }}>
-                                ⏱️ {tiempoDesdeAsignacion}
-                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
+                                <AppIcon name="clock" size={16} color="#2980b9" />
+                                <Text style={{ fontSize: 17, fontWeight: 'bold', color: '#2980b9', marginLeft: 5 }}>
+                                    {tiempoDesdeAsignacion}
+                                </Text>
+                            </View>
                             <Text style={{ fontSize: 10, color: '#666', marginTop: 2, textAlign: 'center' }}>
                                 (fecha_asignacion)
                             </Text>
@@ -816,9 +882,12 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                             <Text style={{ fontSize: 12, color: '#8e44ad', textAlign: 'center', fontWeight: '600' }}>
                                 2. En Proceso (Trabajo)
                             </Text>
-                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#8e44ad', marginTop: 6 }}>
-                                🛠️ {tiempoEnProceso}
-                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
+                                <AppIcon name="wrench" size={16} color="#8e44ad" />
+                                <Text style={{ fontSize: 17, fontWeight: 'bold', color: '#8e44ad', marginLeft: 5 }}>
+                                    {tiempoEnProceso}
+                                </Text>
+                            </View>
                             <Text style={{ fontSize: 10, color: '#666', marginTop: 2, textAlign: 'center' }}>
                                 (fecha_inicio)
                             </Text>
@@ -832,16 +901,26 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                 Presiona <Text style={{ fontWeight: 'bold' }}>Poner En Proceso</Text> para iniciar el 2do cronómetro (<Text style={{ fontWeight: 'bold' }}>fecha_inicio</Text>) y bloquear reasignaciones del operador:
                             </Text>
                             <TouchableOpacity
-                                style={[styles.button, { backgroundColor: '#8e44ad' }]}
+                                style={[styles.button, { backgroundColor: '#8e44ad', flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
                                 onPress={handlePonerEnProceso}
                                 disabled={cargando}
                             >
-                                {cargando ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>▶️ Poner En Proceso (Iniciar Soporte)</Text>}
+                                {cargando ? (
+                                    <ActivityIndicator color="#FFF" />
+                                ) : (
+                                    <>
+                                        <AppIcon name="play" size={16} color="#ffffff" />
+                                        <Text style={styles.buttonText}>Poner En Proceso (Iniciar Soporte)</Text>
+                                    </>
+                                )}
                             </TouchableOpacity>
                         </View>
                     ) : (
                         <View style={[styles.itemBox, { borderLeftWidth: 4, borderLeftColor: '#8e44ad', marginBottom: 18 }]}>
-                            <Text style={{ fontWeight: 'bold', color: '#8e44ad' }}>🛠️ Soporte actualmente En Proceso</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                <AppIcon name="wrench" size={16} color="#8e44ad" />
+                                <Text style={{ fontWeight: 'bold', color: '#8e44ad', marginLeft: 6 }}>Soporte actualmente En Proceso</Text>
+                            </View>
                             <Text style={{ color: '#555', fontSize: 13, marginTop: 4 }}>
                                 Ambos cronómetros están corriendo y solo se detendrán cuando subas el acta y finalices el soporte.
                             </Text>
@@ -850,18 +929,22 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
 
                     {/* SECCIÓN PARA FINALIZAR SOPORTE Y SUBIR ACTA */}
                     <View style={{ borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 16, marginTop: 4 }}>
-                        <Text style={styles.sectionTitle}>✅ Finalizar Soporte y Subir Acta</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                            <AppIcon name="check" size={18} color="#27ae60" />
+                            <Text style={[styles.sectionTitle, { marginBottom: 0, marginLeft: 7 }]}>Finalizar Soporte y Subir Acta</Text>
+                        </View>
 
                         <Text style={styles.label}>1. Acta de Soporte (Imagen / Foto) *</Text>
                         <TouchableOpacity
                             style={[
                                 styles.addMoreButton,
-                                { marginTop: 4, marginBottom: 12, borderStyle: 'dashed', backgroundColor: archivoActaUri ? '#eafaf1' : '#f9f9f9', borderColor: archivoActaUri ? '#27ae60' : theme.colors.primary }
+                                { marginTop: 4, marginBottom: 12, borderStyle: 'dashed', backgroundColor: archivoActaUri ? '#eafaf1' : '#f9f9f9', borderColor: archivoActaUri ? '#27ae60' : theme.colors.primary, flexDirection: 'row', justifyContent: 'center', gap: 8 }
                             ]}
                             onPress={handleSeleccionarActa}
                         >
+                            <AppIcon name={archivoActaUri ? 'check' : 'camera'} size={17} color={archivoActaUri ? '#27ae60' : theme.colors.primary} />
                             <Text style={{ color: archivoActaUri ? '#27ae60' : theme.colors.primary, fontWeight: 'bold' }}>
-                                {archivoActaUri ? `📎 Acta seleccionada: ${nombreArchivoActa}` : '📷 Seleccionar Foto / Imagen del Acta'}
+                                {archivoActaUri ? `Acta seleccionada: ${nombreArchivoActa}` : 'Seleccionar Foto / Imagen del Acta'}
                             </Text>
                         </TouchableOpacity>
 
@@ -879,7 +962,10 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                 styles.button,
                                 {
                                     backgroundColor: '#27ae60',
-                                    opacity: archivoActaUri && diagnostico.trim() ? 1 : 0.5
+                                    opacity: archivoActaUri && diagnostico.trim() ? 1 : 0.5,
+                                    flexDirection: 'row',
+                                    justifyContent: 'center',
+                                    gap: 8,
                                 }
                             ]}
                             onPress={handleFinalizar}
@@ -888,7 +974,10 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                             {cargando ? (
                                 <ActivityIndicator color="#FFF" />
                             ) : (
-                                <Text style={styles.buttonText}>📤 Subir Acta y Finalizar Soporte</Text>
+                                <>
+                                    <AppIcon name="check" size={18} color="#ffffff" />
+                                    <Text style={styles.buttonText}>Subir Acta y Finalizar Soporte</Text>
+                                </>
                             )}
                         </TouchableOpacity>
                     </View>
@@ -896,11 +985,12 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                     {/* BOTÓN PARA DERIVAR A OTRO TÉCNICO */}
                     <View style={{ borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 16, marginTop: 20 }}>
                         <TouchableOpacity
-                            style={[styles.addMoreButton, { borderColor: '#e67e22', marginTop: 0 }]}
+                            style={[styles.addMoreButton, { borderColor: '#e67e22', marginTop: 0, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
                             onPress={() => setModalReasignarVisible(true)}
                         >
+                            <AppIcon name="refresh" size={16} color="#e67e22" />
                             <Text style={[styles.addMoreButtonText, { color: '#e67e22' }]}>
-                                🔄 Derivar soporte a otro Técnico
+                                Derivar soporte a otro Técnico
                             </Text>
                         </TouchableOpacity>
                     </View>
@@ -932,13 +1022,15 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                                 disabled={Boolean(esMismoTecnico)}
                                                 style={[
                                                     styles.itemBox,
+                                                    { flexDirection: 'row', alignItems: 'center' },
                                                     esMismoTecnico && { opacity: 0.5, backgroundColor: '#eee' },
                                                     idNuevoTecnico === tec.id && { borderColor: theme.colors.primary, backgroundColor: '#eef2f9' }
                                                 ]}
                                                 onPress={() => setIdNuevoTecnico(tec.id)}
                                             >
-                                                <Text style={{ fontWeight: 'bold', color: idNuevoTecnico === tec.id ? theme.colors.primary : '#333' }}>
-                                                    🧑‍🔧 {tec.nombre} {esMismoTecnico ? '(Tú)' : ''}
+                                                <AppIcon name="user" size={16} color={idNuevoTecnico === tec.id ? theme.colors.primary : '#333'} />
+                                                <Text style={{ fontWeight: 'bold', color: idNuevoTecnico === tec.id ? theme.colors.primary : '#333', marginLeft: 8 }}>
+                                                    {tec.nombre} {esMismoTecnico ? '(Tú)' : ''}
                                                 </Text>
                                             </TouchableOpacity>
                                         );
@@ -991,7 +1083,9 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                     style={[styles.miniOption, nuevoTipoSoporte === tipo.id && styles.miniOptionActive]}
                                     onPress={() => setNuevoTipoSoporte(tipo.id)}
                                 >
-                                    <Text style={styles.miniOptionIcon}>{tipo.icono}</Text>
+                                    <View style={{ marginBottom: 6 }}>
+                                        <AppIcon name={tipo.icono} size={20} color={nuevoTipoSoporte === tipo.id ? theme.colors.primary : '#666'} />
+                                    </View>
                                     <Text style={[styles.miniOptionText, nuevoTipoSoporte === tipo.id && styles.miniOptionTextActive]}>{tipo.titulo}</Text>
                                 </TouchableOpacity>
                             ))}
