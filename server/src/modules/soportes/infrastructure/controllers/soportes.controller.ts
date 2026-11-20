@@ -207,6 +207,30 @@ export class SoportesController {
     return { exito: true, datos: tecnicos };
   }
 
+  @Get('mis-roles')
+  async obtenerMisRoles(@Req() req: any) {
+    const idUsuario = Number(req.user?.id);
+    const roles: string[] = await this.soporteRepo.obtenerRolesDeUsuario(idUsuario);
+    let rolPrincipal = 'SIN_ROL';
+    if (roles.includes('OPERADOR')) {
+      rolPrincipal = 'OPERADOR';
+    } else if (roles.includes('ADMINISTRADOR')) {
+      rolPrincipal = 'ADMINISTRADOR';
+    } else if (roles.includes('TECNICO')) {
+      rolPrincipal = 'TECNICO';
+    } else if (roles.includes('USUARIO')) {
+      rolPrincipal = 'USUARIO';
+    } else if (roles.length > 0) {
+      rolPrincipal = roles[0];
+    }
+    return {
+      status: 200,
+      success: true,
+      rol: rolPrincipal,
+      roles: roles,
+    };
+  }
+
   @Post('solicitud/:id/en-proceso')
   async ponerEnProceso(
     @Param('id', ParseIntPipe) idSolicitud: number,
@@ -288,7 +312,7 @@ export class SoportesController {
     const rolSoporte = String(body.rol_soporte ?? body.rolSoporte ?? '').trim().toUpperCase();
 
     if (!idUsuarioDestino || !rolSoporte) {
-      throw new BadRequestException('Debes proporcionar id_usuario y rol_soporte (OPERADOR, TECNICO o ADMINISTRADOR).');
+      throw new BadRequestException('Debes proporcionar id_usuario y rol_soporte (USUARIO, OPERADOR, TECNICO o ADMINISTRADOR).');
     }
 
     const idAdminActual = Number(req.user?.id);
@@ -328,10 +352,10 @@ export class SoportesController {
       success: true,
       mensaje: rolAQuitar
         ? `Rol ${rolAQuitar} quitado correctamente.`
-        : 'Roles revocados correctamente. El funcionario vuelve a ser USUARIO por defecto.',
+        : 'Roles revocados correctamente. El funcionario queda sin rol asignado.',
       message: rolAQuitar
         ? `Rol ${rolAQuitar} quitado correctamente.`
-        : 'Roles revocados correctamente. El funcionario vuelve a ser USUARIO por defecto.',
+        : 'Roles revocados correctamente. El funcionario queda sin rol asignado.',
       datos: resultado,
       data: resultado,
     };

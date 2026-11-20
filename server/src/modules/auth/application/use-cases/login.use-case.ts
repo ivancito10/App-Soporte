@@ -29,8 +29,8 @@ export class LoginUseCase {
         await this.userRepo.actualizarUltimoLogin(user.id);
 
         // --- INICIO CÓDIGO DTIC (No afecta a Fisioterapia/Enfermería) ---
-        let rolSoporte = 'USUARIO';
-        let rolesSoporte: string[] = ['USUARIO'];
+        let rolSoporte = 'SIN_ROL';
+        let rolesSoporte: string[] = [];
         try {
             const result = await this.dataSource.query(
                 `SELECT rol_soporte FROM administracion.soportes_usuarios_roles WHERE id_usuario = $1 AND estado = true`,
@@ -46,9 +46,15 @@ export class LoginUseCase {
                 );
                 if (rolesExtraidos.length > 0) {
                     rolesSoporte = rolesExtraidos;
-                    // Si tiene OPERADOR (ej. Jefe con OPERADOR + ADMINISTRADOR), entra por defecto a OPERADOR
+                    // Prioridad de entrada por defecto si el usuario tiene varios roles activos
                     if (rolesExtraidos.includes('OPERADOR')) {
                         rolSoporte = 'OPERADOR';
+                    } else if (rolesExtraidos.includes('ADMINISTRADOR')) {
+                        rolSoporte = 'ADMINISTRADOR';
+                    } else if (rolesExtraidos.includes('TECNICO')) {
+                        rolSoporte = 'TECNICO';
+                    } else if (rolesExtraidos.includes('USUARIO')) {
+                        rolSoporte = 'USUARIO';
                     } else {
                         rolSoporte = rolesExtraidos[0];
                     }
@@ -56,7 +62,6 @@ export class LoginUseCase {
             }
         } catch (error) {
             // Si la tabla no existe o hay error, lo ignoramos silenciosamente
-            // para que los médicos sigan iniciando sesión sin problemas.
             console.log(`Log Soporte: Usuario ${user.id} sin rol específico.`);
         }
         // --- FIN CÓDIGO DTIC ---

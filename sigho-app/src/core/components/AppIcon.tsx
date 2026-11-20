@@ -31,6 +31,7 @@ export type NombreIcono =
     | 'lock'
     | 'id-card'
     | 'close'
+    | 'arrow-left'
     | 'arrow-right';
 
 interface AppIconProps {
@@ -255,6 +256,13 @@ export const AppIcon = ({ name, size = 18, color = '#164a96' }: AppIconProps) =>
                     <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                         <line x1="18" y1="6" x2="6" y2="18" />
                         <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                );
+            case 'arrow-left':
+                return (
+                    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="19" y1="12" x2="5" y2="12" />
+                        <polyline points="12 19 5 12 12 5" />
                     </svg>
                 );
             case 'arrow-right':
@@ -798,6 +806,24 @@ export const AppIcon = ({ name, size = 18, color = '#164a96' }: AppIconProps) =>
                 <View style={box}>
                     <View style={{ position: 'absolute', width: size * 0.68, height: bw * 1.15, backgroundColor: color, transform: [{ rotate: '45deg' }] }} />
                     <View style={{ position: 'absolute', width: size * 0.68, height: bw * 1.15, backgroundColor: color, transform: [{ rotate: '-45deg' }] }} />
+                </View>
+            );
+
+        case 'arrow-left':
+            return (
+                <View style={[box, { flexDirection: 'row' }]}>
+                    <View
+                        style={{
+                            width: size * 0.28,
+                            height: size * 0.28,
+                            borderBottomWidth: bw * 1.1,
+                            borderLeftWidth: bw * 1.1,
+                            borderColor: color,
+                            transform: [{ rotate: '45deg' }],
+                            marginRight: -size * 0.22,
+                        }}
+                    />
+                    <View style={{ width: size * 0.55, height: bw * 1.1, backgroundColor: color }} />
                 </View>
             );
 

@@ -829,6 +829,17 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
     return rows && rows.length > 0;
   }
 
+  async obtenerRolesDeUsuario(idUsuario: number): Promise<string[]> {
+    if (!idUsuario) return [];
+    const rows = await this.dataSource.query(
+      `SELECT DISTINCT UPPER(rol_soporte) as rol
+       FROM administracion.soportes_usuarios_roles
+       WHERE id_usuario = $1 AND estado = true`,
+      [idUsuario]
+    );
+    return rows.map((r: any) => r.rol);
+  }
+
   private async asegurarEsquemaMultiRol(queryRunner: any): Promise<void> {
     try {
       // Si existía una restricción UNIQUE o PK de una sola columna sobre id_usuario,
@@ -866,9 +877,9 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
           u.name
         ) as nombre_completo,
         p.ci as ci,
-        COALESCE(sur.rol_principal, 'USUARIO') as rol_soporte,
+        COALESCE(sur.rol_principal, 'SIN_ROL') as rol_soporte,
         COALESCE(sur.roles_activos, ARRAY[]::text[]) as roles_activos,
-        CASE WHEN sur.id_usuario IS NOT NULL THEN true ELSE false END as tiene_rol_especial
+        CASE WHEN sur.id_usuario IS NOT NULL AND array_length(sur.roles_activos, 1) > 0 THEN true ELSE false END as tiene_rol_especial
       FROM administracion.users u
       LEFT JOIN administracion.persona p ON p.id = u.id_persona
       LEFT JOIN (
@@ -890,9 +901,9 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
 
   async asignarRolUsuario(idUsuario: number, rolSoporte: string): Promise<any> {
     const rolLimpio = String(rolSoporte || '').trim().toUpperCase();
-    const rolesPermitidos = ['OPERADOR', 'TECNICO', 'ADMINISTRADOR'];
+    const rolesPermitidos = ['USUARIO', 'OPERADOR', 'TECNICO', 'ADMINISTRADOR'];
     if (!rolesPermitidos.includes(rolLimpio)) {
-      throw new Error('Rol no válido. Solo se permiten OPERADOR, TECNICO o ADMINISTRADOR.');
+      throw new Error('Rol no válido. Solo se permiten USUARIO, OPERADOR, TECNICO o ADMINISTRADOR.');
     }
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -996,7 +1007,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
 
     return {
       id_usuario: Number(idUsuario),
-      rol_soporte: rolesRestantes[0] || 'USUARIO',
+      rol_soporte: rolesRestantes[0] || 'SIN_ROL',
       roles_activos: rolesRestantes,
       estado: rolesRestantes.length > 0,
     };

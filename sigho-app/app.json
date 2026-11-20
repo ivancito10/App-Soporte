@@ -17,6 +17,7 @@
     },
     "android": {
       "package": "org.ssulapaz.sighoapp",
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/ssu-icon-square.png"

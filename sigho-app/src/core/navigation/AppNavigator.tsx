@@ -11,6 +11,8 @@ import { BandejaScreen } from '../../features/soportes/screens/BandejaScreen';
 import { TicketDetalleScreen } from '../../features/soportes/screens/TicketDetalleScreen';
 import { CrearSolicitudScreen } from '../../features/soportes/screens/CrearSolicitudScreen';
 import { GestionRolesScreen } from '../../features/soportes/screens/GestionRolesScreen';
+import { SinRolScreen } from '../../features/soportes/screens/SinRolScreen';
+import { obtenerMisRoles } from '../../features/soportes/api/soporte.service';
 
 const Stack = createNativeStackNavigator();
 
@@ -18,21 +20,39 @@ export const AppNavigator = () => {
     const [cargando, setCargando] = useState(true);
     const [autenticado, setAutenticado] = useState(false);
     const [rolActivo, setRolActivo] = useState<string | null>(null);
-    const [rolesDisponibles, setRolesDisponibles] = useState<string[]>(['USUARIO']);
+    const [rolesDisponibles, setRolesDisponibles] = useState<string[]>([]);
     const escudosHistorialRef = useRef<number>(0);
 
-    // Esta función la llamamos tanto al inicio como justo después del login
-    const verificarSesion = async () => {
+    // Esta función la llamamos tanto al inicio como justo después del login o al pulsar "Verificar acceso"
+    const verificarSesion = async (forzarConsultaServidor = false) => {
         try {
             const token = await obtenerItem('jwtToken');
-            const userDataStr = await obtenerItem('userData');
+            let userDataStr = await obtenerItem('userData');
 
             if (token && userDataStr) {
-                const userData = JSON.parse(userDataStr);
-                const listaRoles: string[] = Array.isArray(userData.roles) && userData.roles.length > 0
-                    ? userData.roles
-                    : [userData.rol || 'USUARIO'];
-                const rolInicial = userData.rol || listaRoles[0] || 'USUARIO';
+                let userData = JSON.parse(userDataStr);
+
+                // Si no tiene roles o se pide forzar consulta, le preguntamos al backend si el admin ya le asignó rol
+                if (forzarConsultaServidor || userData.rol === 'SIN_ROL' || !userData.roles || userData.roles.length === 0) {
+                    try {
+                        const respRoles = await obtenerMisRoles();
+                        if (respRoles?.success) {
+                            userData.rol = respRoles.rol || 'SIN_ROL';
+                            userData.roles = respRoles.roles || [];
+                            await guardarItem('userData', JSON.stringify(userData));
+                        }
+                    } catch (e) {
+                        console.log('Error actualizando roles desde backend:', e);
+                    }
+                }
+
+                const listaRoles: string[] = Array.isArray(userData.roles)
+                    ? userData.roles.filter((r: string) => r && r !== 'SIN_ROL')
+                    : [];
+
+                const rolInicial = listaRoles.length > 0
+                    ? (userData.rol && listaRoles.includes(userData.rol) ? userData.rol : listaRoles[0])
+                    : 'SIN_ROL';
 
                 setRolesDisponibles(listaRoles);
                 setRolActivo(rolInicial);
@@ -51,7 +71,7 @@ export const AppNavigator = () => {
             } else {
                 setAutenticado(false);
                 setRolActivo(null);
-                setRolesDisponibles(['USUARIO']);
+                setRolesDisponibles([]);
             }
         } catch (error) {
             console.error('Error leyendo sesión:', error);
@@ -148,8 +168,22 @@ export const AppNavigator = () => {
                     </Stack.Screen>
                 ) : (
                     <>
-                        {/* Si el rol activo es ADMINISTRADOR muestra Gestión de Roles, de lo contrario muestra la Bandeja del rol activo */}
-                        {rolActivo === 'ADMINISTRADOR' ? (
+                        {/* 1. Si el usuario no tiene ningún rol asignado, pantalla de espera sin acceso */}
+                        {rolActivo === 'SIN_ROL' || rolesDisponibles.length === 0 ? (
+                            <Stack.Screen name="Main">
+                                {(props) => (
+                                    <SinRolScreen
+                                        {...props}
+                                        onVerificar={() => verificarSesion(true)}
+                                        onLogout={() => {
+                                            setAutenticado(false);
+                                            setRolActivo(null);
+                                            setRolesDisponibles([]);
+                                        }}
+                                    />
+                                )}
+                            </Stack.Screen>
+                        ) : rolActivo === 'ADMINISTRADOR' ? (
                             <Stack.Screen name="Main">
                                 {(props) => (
                                     <GestionRolesScreen
@@ -161,7 +195,7 @@ export const AppNavigator = () => {
                                         onLogout={() => {
                                             setAutenticado(false);
                                             setRolActivo(null);
-                                            setRolesDisponibles(['USUARIO']);
+                                            setRolesDisponibles([]);
                                         }}
                                     />
                                 )}
@@ -177,7 +211,7 @@ export const AppNavigator = () => {
                                         onLogout={() => {
                                             setAutenticado(false);
                                             setRolActivo(null);
-                                            setRolesDisponibles(['USUARIO']);
+                                            setRolesDisponibles([]);
                                         }}
                                     />
                                 )}
@@ -192,7 +226,7 @@ export const AppNavigator = () => {
                         <Stack.Screen
                             name="CrearSolicitud"
                             component={CrearSolicitudScreen}
-                            options={{ headerShown: true, title: 'Nueva Solicitud', headerStyle: { backgroundColor: theme.colors.primary }, headerTintColor: '#fff' }}
+                            options={{ headerShown: false }}
                         />
                     </>
                 )}

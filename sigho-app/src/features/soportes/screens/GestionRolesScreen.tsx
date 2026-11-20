@@ -37,13 +37,21 @@ export interface UsuarioRolItem {
 }
 
 const ROLES_DISPONIBLES: Array<{
-    rol: 'OPERADOR' | 'TECNICO' | 'ADMINISTRADOR';
+    rol: 'USUARIO' | 'OPERADOR' | 'TECNICO' | 'ADMINISTRADOR';
     titulo: string;
     descripcion: string;
     icono: NombreIcono;
     color: string;
     bg: string;
 }> = [
+    {
+        rol: 'USUARIO',
+        titulo: 'USUARIO',
+        descripcion: 'Crea solicitudes de soporte técnico y hace seguimiento a sus tickets.',
+        icono: 'user',
+        color: '#16a34a',
+        bg: '#dcfce7',
+    },
     {
         rol: 'OPERADOR',
         titulo: 'OPERADOR',
@@ -71,7 +79,7 @@ const ROLES_DISPONIBLES: Array<{
 ];
 
 const obtenerBadgeRol = (rol?: string): { texto: string; icono: NombreIcono; color: string; bg: string; border: string } => {
-    const r = (rol || 'USUARIO').toUpperCase();
+    const r = (rol || '').toUpperCase();
     if (r === 'OPERADOR') {
         return { texto: 'OPERADOR', icono: 'headset', color: '#1d4ed8', bg: '#dbeafe', border: '#bfdbfe' };
     }
@@ -81,7 +89,10 @@ const obtenerBadgeRol = (rol?: string): { texto: string; icono: NombreIcono; col
     if (r === 'ADMINISTRADOR') {
         return { texto: 'ADMINISTRADOR', icono: 'shield', color: '#b45309', bg: '#fef3c7', border: '#fde68a' };
     }
-    return { texto: 'USUARIO', icono: 'user', color: '#475569', bg: '#f1f5f9', border: '#e2e8f0' };
+    if (r === 'USUARIO') {
+        return { texto: 'USUARIO', icono: 'user', color: '#16a34a', bg: '#dcfce7', border: '#bbf7d0' };
+    }
+    return { texto: 'SIN ROL', icono: 'lock', color: '#64748b', bg: '#f1f5f9', border: '#e2e8f0' };
 };
 
 const obtenerRolesDeUsuario = (item?: UsuarioRolItem | null): string[] => {
@@ -89,10 +100,10 @@ const obtenerRolesDeUsuario = (item?: UsuarioRolItem | null): string[] => {
     if (Array.isArray(item.roles_activos) && item.roles_activos.length > 0) {
         return item.roles_activos
             .map((r) => String(r).toUpperCase())
-            .filter((r) => r === 'OPERADOR' || r === 'TECNICO' || r === 'ADMINISTRADOR');
+            .filter((r) => r === 'USUARIO' || r === 'OPERADOR' || r === 'TECNICO' || r === 'ADMINISTRADOR');
     }
     const r = (item.rol_soporte || '').toUpperCase();
-    if (r === 'OPERADOR' || r === 'TECNICO' || r === 'ADMINISTRADOR') {
+    if (r === 'USUARIO' || r === 'OPERADOR' || r === 'TECNICO' || r === 'ADMINISTRADOR') {
         return [r];
     }
     return [];
@@ -207,6 +218,7 @@ export const GestionRolesScreen = ({
     };
 
     // Contadores KPI de personal por rol
+    const totalUsuarios = usuarios.filter((u) => obtenerRolesDeUsuario(u).includes('USUARIO')).length;
     const totalOperadores = usuarios.filter((u) => obtenerRolesDeUsuario(u).includes('OPERADOR')).length;
     const totalTecnicos = usuarios.filter((u) => obtenerRolesDeUsuario(u).includes('TECNICO')).length;
     const totalAdmins = usuarios.filter((u) => obtenerRolesDeUsuario(u).includes('ADMINISTRADOR')).length;
@@ -252,7 +264,7 @@ export const GestionRolesScreen = ({
         }
     };
 
-    const handleAlternarRol = async (rolObjetivo: 'OPERADOR' | 'TECNICO' | 'ADMINISTRADOR') => {
+    const handleAlternarRol = async (rolObjetivo: 'USUARIO' | 'OPERADOR' | 'TECNICO' | 'ADMINISTRADOR') => {
         if (!usuarioSeleccionado) return;
 
         const rolesActuales = obtenerRolesDeUsuario(usuarioSeleccionado);
@@ -403,7 +415,7 @@ export const GestionRolesScreen = ({
     };
 
     const rolesSeleccionado = obtenerRolesDeUsuario(usuarioSeleccionado);
-    const rolActualSeleccionado = rolesSeleccionado.length > 0 ? rolesSeleccionado.join(' + ') : 'USUARIO';
+    const rolActualSeleccionado = rolesSeleccionado.length > 0 ? rolesSeleccionado.join(' + ') : 'SIN ROL';
     const tieneRolEspecial = rolesSeleccionado.length > 0;
     const esAutoEdicion =
         usuarioSeleccionado !== null &&
@@ -477,19 +489,23 @@ export const GestionRolesScreen = ({
                     </View>
                 </View>
 
-                {/* 3 Tarjetas KPI */}
+                {/* 4 Tarjetas KPI */}
                 <View style={styles.kpiRow}>
                     <View style={styles.kpiCard}>
-                        <Text style={styles.kpiNumber}>{totalOperadores}</Text>
+                        <Text style={[styles.kpiNumber, { color: '#16a34a' }]}>{totalUsuarios}</Text>
+                        <Text style={styles.kpiLabel}>Usuarios</Text>
+                    </View>
+                    <View style={styles.kpiCard}>
+                        <Text style={[styles.kpiNumber, { color: '#1d4ed8' }]}>{totalOperadores}</Text>
                         <Text style={styles.kpiLabel}>Operadores</Text>
                     </View>
                     <View style={styles.kpiCard}>
-                        <Text style={styles.kpiNumber}>{totalTecnicos}</Text>
+                        <Text style={[styles.kpiNumber, { color: '#6d28d9' }]}>{totalTecnicos}</Text>
                         <Text style={styles.kpiLabel}>Técnicos</Text>
                     </View>
                     <View style={styles.kpiCard}>
-                        <Text style={styles.kpiNumber}>{totalAdmins}</Text>
-                        <Text style={styles.kpiLabel}>Administradores</Text>
+                        <Text style={[styles.kpiNumber, { color: '#b45309' }]}>{totalAdmins}</Text>
+                        <Text style={styles.kpiLabel}>Admins</Text>
                     </View>
                 </View>
 
@@ -728,16 +744,16 @@ export const GestionRolesScreen = ({
                                             >
                                                 <AppIcon name="trash" size={16} color="#c0392b" />
                                                 <Text style={styles.removeRoleBtnText}>
-                                                    Quitar todos los roles (Volver a Usuario)
+                                                    Quitar todos los roles (Dejar sin rol)
                                                 </Text>
                                             </TouchableOpacity>
                                         ) : (
                                             <View style={styles.confirmRemoveBox}>
                                                 <Text style={styles.confirmRemoveTitle}>
-                                                    ¿Confirmas quitar el rol {rolActualSeleccionado} a {usuarioSeleccionado.nombre_completo}?
+                                                    ¿Confirmas quitar todos los roles a {usuarioSeleccionado.nombre_completo}?
                                                 </Text>
                                                 <Text style={styles.confirmRemoveSub}>
-                                                    El funcionario pasará a ser USUARIO por defecto al iniciar sesión.
+                                                    El funcionario pasará a estar SIN ROL y no podrá realizar solicitudes ni acceder a las opciones hasta que le asignes un rol.
                                                 </Text>
                                                 <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
                                                     <TouchableOpacity

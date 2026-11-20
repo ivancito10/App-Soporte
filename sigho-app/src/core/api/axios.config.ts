@@ -5,8 +5,8 @@ import { obtenerItem } from '../utils/storage';
 // IMPORTANTE: Si usas Expo Go en tu celular físico, NO puedes usar 'localhost'.
 // Debes poner la IP de tu computadora en la red Wi-Fi (ej. 192.168.1.5).
 // En Windows, abre CMD, escribe 'ipconfig' y busca 'Dirección IPv4'.
-//const API_URL = 'http://192.168.100.108:3000/api'; // Reemplaza la IP aquí
-const API_URL = 'http://192.168.2.151:3000/api'; // Reemplaza la IP aquí
+const API_URL = 'http://192.168.100.108:3000/api'; // Reemplaza la IP aquí
+//const API_URL = 'http://192.168.2.151:3000/api'; // Reemplaza la IP aquí
 //const API_URL = 'http://192.168.100.89:3000/api'; // Reemplaza la IP aquí
 
 export const api = axios.create({

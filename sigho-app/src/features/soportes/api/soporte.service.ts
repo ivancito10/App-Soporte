@@ -153,7 +153,7 @@ export const obtenerUsuariosConRoles = async () => {
     return response.data?.datos || response.data?.data || response.data || [];
 };
 
-export const asignarRolUsuario = async (idUsuario: number, rolSoporte: 'OPERADOR' | 'TECNICO' | 'ADMINISTRADOR') => {
+export const asignarRolUsuario = async (idUsuario: number, rolSoporte: 'USUARIO' | 'OPERADOR' | 'TECNICO' | 'ADMINISTRADOR') => {
     const response = await api.post('/soportes/roles/asignar', {
         id_usuario: Number(idUsuario),
         rol_soporte: rolSoporte,
@@ -165,5 +165,10 @@ export const quitarRolUsuario = async (idUsuario: number, rolSoporte?: string) =
     const response = await api.patch(`/soportes/roles/${Number(idUsuario)}/quitar`, {
         rol_soporte: rolSoporte,
     });
+    return response.data;
+};
+
+export const obtenerMisRoles = async () => {
+    const response = await api.get('/soportes/mis-roles');
     return response.data;
 };
