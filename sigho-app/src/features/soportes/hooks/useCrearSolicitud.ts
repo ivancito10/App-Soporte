@@ -1,8 +1,8 @@
 // src/features/soportes/hooks/useCrearSolicitud.ts
 import { useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import axios from 'axios';
-import { crearNuevaSolicitud } from '../api/soporte.service';
+import { crearNuevaSolicitud, subirAdjuntoSolicitud } from '../api/soporte.service';
 import { CrearSolicitudPayload } from '../types/soporte.types';
 
 export const useCrearSolicitud = () => {
@@ -10,7 +10,7 @@ export const useCrearSolicitud = () => {
     const [error, setError] = useState<string | null>(null);
 
     // La función que el botón de "Enviar" ejecutará
-    const enviarSolicitud = async (payload: CrearSolicitudPayload, onSuccess?: () => void) => {
+    const enviarSolicitud = async (payload: CrearSolicitudPayload, onSuccess?: (respuesta?: any) => void | Promise<void>, adjuntoUri?: string | null) => {
         setIsLoading(true);
         setError(null);
 
@@ -18,9 +18,22 @@ export const useCrearSolicitud = () => {
             // 1. Intentamos enviar los datos a NestJS
             const respuesta = await crearNuevaSolicitud(payload);
 
+            if (adjuntoUri) {
+                const solicitud = respuesta?.data ?? respuesta?.datos ?? respuesta;
+                const idSolicitud = Number(solicitud?.idSolicitud ?? solicitud?.id);
+                if (!idSolicitud) throw new Error('La solicitud se creó, pero no se recibió su identificador para adjuntar la imagen.');
+                try {
+                    await subirAdjuntoSolicitud(idSolicitud, adjuntoUri);
+                } catch (error: any) {
+                    const mensaje = error?.response?.data?.message || 'La solicitud se creó, pero no se pudo subir la imagen.';
+                    if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(mensaje);
+                    else Alert.alert('Adjunto no cargado', mensaje);
+                }
+            }
+
             // 2. Si todo sale bien, ejecutamos la acción de éxito (ej. volver a la bandeja)
             if (onSuccess) {
-                onSuccess();
+                await onSuccess(respuesta);
             }
 
             return respuesta;
@@ -38,8 +51,12 @@ export const useCrearSolicitud = () => {
 
             setError(mensajeError);
 
-            // Lanzamos una alerta nativa del celular para que el usuario se entere de inmediato
-            Alert.alert('Error al solicitar soporte', mensajeError);
+            // Lanzamos alerta compatible con Web y Móvil
+            if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
+                window.alert(`Error al solicitar soporte:\n${mensajeError}`);
+            } else {
+                Alert.alert('Error al solicitar soporte', mensajeError);
+            }
 
             return null;
         } finally {

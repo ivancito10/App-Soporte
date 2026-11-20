@@ -14,7 +14,8 @@ export abstract class SoporteRepositoryPort {
   abstract reasignarSoporteTransaccional(
     idAsignacion: number,
     idDeSoporte: number,
-    dto: ReasignarSoporteDto
+    dto: ReasignarSoporteDto,
+    rolDerivacion: 'TECNICO' | 'OPERADOR'
   ): Promise<any>;
 
 
@@ -40,13 +41,15 @@ export abstract class SoporteRepositoryPort {
   // Añade esto junto a las otras funciones que ya tienes
   abstract obtenerItemsDeSolicitud(idSolicitud: number): Promise<any[]>;
 
+  abstract obtenerHistorialTecnicosSolicitud(idSolicitud: number): Promise<any[]>;
+
   abstract agregarItemASolicitud(idSolicitud: number, idTipoSoporte: number, descripcion: string): Promise<any>;
 
   abstract obtenerTecnicosDisponibles(): Promise<any[]>;
 
   abstract ponerEnProcesoSoporte(idSolicitud: number, idSoporte: number): Promise<any>;
 
-  abstract reasignarPorOperador(idSolicitud: number, idNuevoTecnico: number, justificacion: string, prioridad?: string): Promise<any>;
+  abstract reasignarPorOperador(idSolicitud: number, idNuevoTecnico: number, justificacion: string, prioridad?: string, idOperador?: number): Promise<any>;
 
   // GESTIÓN DE ROLES (ADMINISTRADOR)
   abstract esUsuarioAdministrador(idUsuario: number): Promise<boolean>;
@@ -56,4 +59,14 @@ export abstract class SoporteRepositoryPort {
   abstract asignarRolUsuario(idUsuario: number, rolSoporte: string): Promise<any>;
 
   abstract quitarRolUsuario(idUsuario: number, rolSoporte?: string): Promise<any>;
+
+  abstract obtenerConsultoriosPorSede(idSede: number): Promise<any[]>;
+
+  abstract obtenerTiposSoporteConOpciones(): Promise<any[]>;
+
+  abstract crearOpcionTipoSoporte(idTipoSoporte: number, nombre: string): Promise<any>;
+
+  abstract alternarEstadoOpcionTipoSoporte(idOpcion: number, estado: boolean): Promise<any>;
+
+  abstract guardarAdjuntoSolicitud(idSolicitud: number, idUsuario: number, archivo: { nombre_archivo: string; ruta_url: string; tipo_mime: string }): Promise<any>;
 }

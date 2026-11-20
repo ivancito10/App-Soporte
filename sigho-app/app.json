@@ -29,6 +29,13 @@
     },
     "plugins": [
       "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Permite acceder a tus imágenes para adjuntar el acta de soporte.",
+          "cameraPermission": "Permite usar la cámara para tomar una foto del acta de soporte."
+        }
+      ],
       "./withCleartextTraffic.js"
     ],
     "extra": {

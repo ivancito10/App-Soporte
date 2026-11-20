@@ -168,6 +168,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
     idAsignacion: number,
     idDeSoporte: number,
     dto: ReasignarSoporteDto,
+    rolDerivacion: 'TECNICO' | 'OPERADOR',
   ): Promise<any> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -189,15 +190,32 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       nuevaReasignacion.idDeSoporte = idDeSoporte;
       nuevaReasignacion.idASoporte = dto.id_a_soporte;
       nuevaReasignacion.justificacion = dto.justificacion;
+      nuevaReasignacion.rolDerivacion = rolDerivacion;
 
       await queryRunner.manager.save(nuevaReasignacion);
 
-      // 3. Actualizar la tabla soporte_asignaciones usando Entidad
-      asignacion.idSoporte = Number(dto.id_a_soporte);
-      asignacion.estado = 'ASIGNADA';
-      asignacion.fechaAsignacion = new Date();
+      if (!['ASIGNADA', 'EN_PROCESO'].includes(String(asignacion.estado).toUpperCase())) {
+        throw new Error('Solo se puede derivar una asignación activa.');
+      }
 
-      await queryRunner.manager.save(asignacion);
+      // Cerrar la asignación del técnico actual; fecha_inicio permanece NULL si no inició el proceso.
+      const etapaCerrada = await queryRunner.query(
+        `UPDATE administracion.soporte_asignaciones
+         SET estado = 'DERIVADA', fecha_fin = CURRENT_TIMESTAMP
+         WHERE id = $1 AND id_soporte = $2 AND estado IN ('ASIGNADA', 'EN_PROCESO')
+         RETURNING id`,
+        [idAsignacion, idDeSoporte]
+      );
+      if (!etapaCerrada?.length) throw new Error('La asignación ya no está activa para derivar.');
+
+      // Cada técnico tiene su propia asignación y sus cronómetros comienzan en cero.
+      const nuevaAsignacion = await queryRunner.query(
+        `INSERT INTO administracion.soporte_asignaciones
+          (id_solicitud_item, id_soporte, id_asignado_por, fecha_asignacion, fecha_inicio, fecha_fin, estado, observacion, prioridad)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP, NULL, NULL, 'ASIGNADA', NULL, $4)
+         RETURNING id`,
+        [asignacion.idSolicitudItem, Number(dto.id_a_soporte), idDeSoporte, asignacion.prioridad ?? 'NORMAL']
+      );
 
       // Aseguramos que la solicitud vuelva a ASIGNADA para el nuevo técnico
       await queryRunner.query(
@@ -211,7 +229,8 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       await queryRunner.commitTransaction();
 
       return {
-        idAsignacion: asignacion.id,
+        idAsignacionAnterior: asignacion.id,
+        idAsignacion: Number(nuevaAsignacion[0].id),
         nuevoTecnico: dto.id_a_soporte,
       };
 
@@ -334,7 +353,11 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         ) as ultima_resolicitud_motivo
       FROM administracion.soporte_solicitudes s
       LEFT JOIN administracion.soporte_solicitud_items si ON si.id_solicitud = s.id
-      LEFT JOIN administracion.soporte_asignaciones a ON a.id_solicitud_item = si.id
+      LEFT JOIN LATERAL (
+        SELECT ax.* FROM administracion.soporte_asignaciones ax
+        WHERE ax.id_solicitud_item = si.id
+        ORDER BY ax.id DESC LIMIT 1
+      ) a ON TRUE
       LEFT JOIN administracion.soporte_archivos_actas ac ON ac.id_asignacion = a.id
       LEFT JOIN administracion.users u ON u.id = a.id_soporte
       LEFT JOIN administracion.persona p ON p.id = u.id_persona
@@ -405,7 +428,11 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       LEFT JOIN administracion.soporte_re_solicitudes rs ON rs.id_solicitud = s.id
       -- Puente para llegar a las asignaciones a través de los ítems
       LEFT JOIN administracion.soporte_solicitud_items si ON si.id_solicitud = s.id
-      LEFT JOIN administracion.soporte_asignaciones a ON a.id_solicitud_item = si.id
+      LEFT JOIN LATERAL (
+        SELECT ax.* FROM administracion.soporte_asignaciones ax
+        WHERE ax.id_solicitud_item = si.id
+        ORDER BY ax.id DESC LIMIT 1
+      ) a ON TRUE
       LEFT JOIN administracion.soporte_archivos_actas ac ON ac.id_asignacion = a.id
       -- En tu BD la tabla de usuarios es administracion.users y la persona tiene el nombre completo
       LEFT JOIN administracion.users u ON u.id = a.id_soporte
@@ -508,11 +535,11 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         s.consultorio,
         a.estado,
         a.prioridad,
-        a.fecha_asignacion,
-        a.fecha_inicio,
+        CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN legado.fecha_derivacion ELSE a.fecha_asignacion END as fecha_asignacion,
+        CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN NULL ELSE a.fecha_inicio END as fecha_inicio,
         a.fecha_fin as fecha_finalizacion,
-        GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_asignacion))))::int as segundos_desde_asignacion,
-        CASE WHEN a.fecha_inicio IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_inicio))))::int ELSE NULL END as segundos_desde_inicio,
+        GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN legado.fecha_derivacion ELSE a.fecha_asignacion END))))::int as segundos_desde_asignacion,
+        CASE WHEN a.fecha_inicio IS NOT NULL AND NOT (a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL) THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_inicio))))::int ELSE NULL END as segundos_desde_inicio,
         a.observacion as diagnostico,
         (
           SELECT ac.ruta_url
@@ -539,10 +566,18 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         (
           SELECT r.justificacion
           FROM administracion.soporte_reasignaciones r
-          WHERE r.id_asignacion = a.id
-          ORDER BY r.id DESC
-          LIMIT 1
+          INNER JOIN administracion.soporte_asignaciones anterior ON anterior.id = r.id_asignacion
+          INNER JOIN administracion.soporte_solicitud_items si2 ON si2.id = anterior.id_solicitud_item
+          WHERE si2.id_solicitud = s.id
+          ORDER BY r.id DESC LIMIT 1
         ) as ultima_reasignacion_motivo,
+        (
+          SELECT COUNT(*)::int
+          FROM administracion.soporte_reasignaciones r
+          INNER JOIN administracion.soporte_asignaciones anterior ON anterior.id = r.id_asignacion
+          INNER JOIN administracion.soporte_solicitud_items si2 ON si2.id = anterior.id_solicitud_item
+          WHERE si2.id_solicitud = s.id
+        ) as cantidad_reasignaciones,
         (
           SELECT COUNT(*)::int
           FROM administracion.soporte_re_solicitudes rs2
@@ -560,7 +595,12 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       INNER JOIN administracion.soporte_solicitudes s ON si.id_solicitud = s.id
       LEFT JOIN administracion.users u ON u.id = a.id_soporte
       LEFT JOIN administracion.persona p ON p.id = u.id_persona
-      WHERE a.id_soporte = $1
+      LEFT JOIN LATERAL (
+        SELECT MAX(r.fecha) AS fecha_derivacion
+        FROM administracion.soporte_reasignaciones r
+        WHERE r.id_asignacion = a.id
+      ) legado ON TRUE
+      WHERE a.id_soporte = $1 AND a.estado <> 'DERIVADA'
     `;
 
     const params: any[] = [idSoporte];
@@ -655,12 +695,131 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
   }
   // Añade esta función en tu clase PostgresSoporteRepository
   async obtenerItemsDeSolicitud(idSolicitud: number): Promise<any[]> {
-    const query = `
-      SELECT id, id_tipo_soporte, descripcion 
-      FROM administracion.soporte_solicitud_items 
-      WHERE id_solicitud = $1
-    `;
-    return await this.dataSource.query(query, [idSolicitud]);
+    const items = await this.dataSource.query(
+      `SELECT id, id_tipo_soporte, descripcion
+       FROM administracion.soporte_solicitud_items
+       WHERE id_solicitud = $1
+       ORDER BY id ASC`,
+      [idSolicitud]
+    );
+    if (items.length === 0) return items;
+
+    try {
+      const adjuntos = await this.dataSource.query(
+        `SELECT id, nombre_archivo, ruta_url, tipo_mime
+         FROM administracion.soporte_solicitud_adjuntos
+         WHERE id_solicitud = $1
+         ORDER BY id ASC`,
+        [idSolicitud]
+      );
+      return items.map((item: any) => ({ ...item, adjuntos }));
+    } catch (error: any) {
+      // La tabla es una migración opcional; los detalles del ticket deben seguir disponibles si aún no se aplicó.
+      if (error?.code === '42P01' || error?.driverError?.code === '42P01') {
+        return items.map((item: any) => ({ ...item, adjuntos: [] }));
+      }
+      throw error;
+    }
+  }
+
+  async obtenerHistorialTecnicosSolicitud(idSolicitud: number): Promise<any[]> {
+    return await this.dataSource.query(`
+      WITH etapas AS (
+        SELECT a.id AS id_asignacion, a.id_soporte,
+          COALESCE(NULLIF(TRIM(CONCAT_WS(' ', p.nombres, p.p_apellido, p.s_apellido)), ''), u.name) AS nombre_tecnico,
+          COALESCE(NULLIF(TRIM(CONCAT_WS(' ', pd.nombres, pd.p_apellido, pd.s_apellido)), ''), ud.name,
+            NULLIF(TRIM(CONCAT_WS(' ', pa.nombres, pa.p_apellido, pa.s_apellido)), ''), ua.name) AS nombre_actor,
+          COALESCE(entrada.rol_derivacion, CASE WHEN entrada.id IS NULL THEN 'OPERADOR' ELSE NULL END) AS rol_actor,
+          CASE WHEN entrada.id IS NULL THEN 'ASIGNACIÓN INICIAL'
+               WHEN entrada.rol_derivacion = 'OPERADOR' THEN 'REASIGNACIÓN POR OPERADOR'
+               WHEN entrada.rol_derivacion = 'TECNICO' THEN 'DERIVACIÓN POR TÉCNICO'
+               ELSE 'REASIGNACIÓN HISTÓRICA (ROL NO REGISTRADO)' END AS tipo_movimiento,
+          COALESCE(NULLIF(TRIM(CONCAT_WS(' ', pdes.nombres, pdes.p_apellido, pdes.s_apellido)), ''), udest.name) AS nombre_destino,
+          CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN legado.fecha_derivacion ELSE a.fecha_asignacion END AS fecha_asignacion,
+          CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN NULL ELSE a.fecha_inicio END AS fecha_inicio,
+          a.fecha_fin, a.estado,
+          GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN legado.fecha_derivacion ELSE a.fecha_asignacion END))))::int AS segundos_desde_asignacion,
+          CASE WHEN a.fecha_inicio IS NOT NULL AND NOT (a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL)
+            THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_inicio))))::int
+            ELSE NULL END AS segundos_en_proceso,
+          entrada.justificacion AS motivo_entrada,
+          salida.rol_derivacion,
+          salida.fecha AS fecha_derivacion,
+          salida.justificacion AS motivo_derivacion,
+          CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN legado.fecha_derivacion ELSE a.fecha_asignacion END AS orden
+        FROM administracion.soporte_asignaciones a
+        INNER JOIN administracion.soporte_solicitud_items si ON si.id = a.id_solicitud_item
+        LEFT JOIN administracion.users u ON u.id = a.id_soporte
+        LEFT JOIN administracion.persona p ON p.id = u.id_persona
+        LEFT JOIN administracion.users ua ON ua.id = a.id_asignado_por
+        LEFT JOIN administracion.persona pa ON pa.id = ua.id_persona
+        LEFT JOIN LATERAL (
+          SELECT r0.* FROM administracion.soporte_reasignaciones r0
+          WHERE r0.id_a_soporte = a.id_soporte
+            AND r0.fecha <= COALESCE(a.fecha_asignacion, CURRENT_TIMESTAMP)
+            AND EXISTS (
+              SELECT 1 FROM administracion.soporte_asignaciones ax
+              WHERE ax.id = r0.id_asignacion AND ax.id_solicitud_item = a.id_solicitud_item
+            )
+          ORDER BY r0.fecha DESC, r0.id DESC LIMIT 1
+        ) entrada ON TRUE
+        LEFT JOIN administracion.users ud ON ud.id = entrada.id_de_soporte
+        LEFT JOIN administracion.persona pd ON pd.id = ud.id_persona
+        LEFT JOIN LATERAL (
+          SELECT MAX(r2.fecha) AS fecha_derivacion
+          FROM administracion.soporte_reasignaciones r2
+          WHERE r2.id_asignacion = a.id AND r2.id_de_soporte <> a.id_soporte
+        ) legado ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT r1.justificacion, r1.rol_derivacion, r1.fecha, r1.id_a_soporte FROM administracion.soporte_reasignaciones r1
+          WHERE r1.id_asignacion = a.id
+            AND (a.estado = 'DERIVADA' OR r1.id_de_soporte = a.id_soporte)
+          ORDER BY r1.id DESC LIMIT 1
+        ) salida ON TRUE
+        LEFT JOIN administracion.users udest ON udest.id = salida.id_a_soporte
+        LEFT JOIN administracion.persona pdes ON pdes.id = udest.id_persona
+        WHERE si.id_solicitud = $1
+
+        UNION ALL
+
+        -- Compatibilidad con derivaciones antiguas que sobrescribieron la fila de asignación.
+        SELECT -r.id AS id_asignacion, r.id_de_soporte AS id_soporte,
+          COALESCE(NULLIF(TRIM(CONCAT_WS(' ', p.nombres, p.p_apellido, p.s_apellido)), ''), u.name) AS nombre_tecnico,
+          COALESCE(NULLIF(TRIM(CONCAT_WS(' ', pd.nombres, pd.p_apellido, pd.s_apellido)), ''), ud.name) AS nombre_actor,
+          r.rol_derivacion AS rol_actor,
+          CASE WHEN r.rol_derivacion = 'OPERADOR' THEN 'REASIGNACIÓN POR OPERADOR'
+               WHEN r.rol_derivacion = 'TECNICO' THEN 'DERIVACIÓN POR TÉCNICO'
+               ELSE 'REASIGNACIÓN HISTÓRICA (ROL NO REGISTRADO)' END AS tipo_movimiento,
+          COALESCE(NULLIF(TRIM(CONCAT_WS(' ', pdes.nombres, pdes.p_apellido, pdes.s_apellido)), ''), udest.name) AS nombre_destino,
+          NULL::timestamp AS fecha_asignacion, NULL::timestamp AS fecha_inicio, r.fecha AS fecha_fin,
+          'DERIVADA'::varchar AS estado, NULL::int AS segundos_desde_asignacion,
+          NULL::int AS segundos_en_proceso, r.justificacion AS motivo_entrada,
+          r.rol_derivacion, r.fecha AS fecha_derivacion, r.justificacion AS motivo_derivacion,
+          r.fecha AS orden
+        FROM administracion.soporte_reasignaciones r
+        INNER JOIN administracion.soporte_asignaciones asignacion_actual ON asignacion_actual.id = r.id_asignacion
+        INNER JOIN administracion.soporte_solicitud_items si ON si.id = asignacion_actual.id_solicitud_item
+        LEFT JOIN administracion.users u ON u.id = r.id_de_soporte
+        LEFT JOIN administracion.persona p ON p.id = u.id_persona
+        LEFT JOIN administracion.users ua ON ua.id = r.id_de_soporte
+        LEFT JOIN administracion.persona pa ON pa.id = ua.id_persona
+        LEFT JOIN administracion.users ud ON ud.id = r.id_de_soporte
+        LEFT JOIN administracion.persona pd ON pd.id = ud.id_persona
+        LEFT JOIN administracion.users udest ON udest.id = r.id_a_soporte
+        LEFT JOIN administracion.persona pdes ON pdes.id = udest.id_persona
+        WHERE si.id_solicitud = $1
+          AND NOT EXISTS (
+            SELECT 1 FROM administracion.soporte_asignaciones anterior
+            WHERE anterior.id_solicitud_item = si.id
+              AND anterior.id_soporte = r.id_de_soporte
+              AND anterior.estado = 'DERIVADA'
+          )
+      )
+      SELECT id_asignacion, id_soporte, nombre_tecnico, nombre_actor, rol_actor, tipo_movimiento, nombre_destino,
+        fecha_asignacion, fecha_inicio, fecha_fin, estado, segundos_desde_asignacion, segundos_en_proceso,
+        motivo_entrada, rol_derivacion, fecha_derivacion, motivo_derivacion
+      FROM etapas ORDER BY orden ASC NULLS LAST, id_asignacion ASC
+    `, [idSolicitud]);
   }
 
   async obtenerActaDeSolicitud(idSolicitud: number): Promise<any | null> {
@@ -715,11 +874,22 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       // Actualizamos la asignación del técnico a EN_PROCESO y registramos fecha_inicio
       const asignaciones = await queryRunner.query(
         `UPDATE administracion.soporte_asignaciones a
-         SET estado = 'EN_PROCESO', fecha_inicio = COALESCE(a.fecha_inicio, CURRENT_TIMESTAMP)
-         FROM administracion.soporte_solicitud_items si
-         WHERE a.id_solicitud_item = si.id
-           AND si.id_solicitud = $1
-           AND a.id_soporte = $2
+         SET estado = 'EN_PROCESO',
+             fecha_asignacion = CASE WHEN EXISTS (
+               SELECT 1 FROM administracion.soporte_reasignaciones r WHERE r.id_asignacion = a.id
+             ) THEN (
+               SELECT MAX(r.fecha) FROM administracion.soporte_reasignaciones r WHERE r.id_asignacion = a.id
+             ) ELSE a.fecha_asignacion END,
+             fecha_inicio = CASE WHEN EXISTS (
+               SELECT 1 FROM administracion.soporte_reasignaciones r WHERE r.id_asignacion = a.id
+             ) THEN CURRENT_TIMESTAMP ELSE COALESCE(a.fecha_inicio, CURRENT_TIMESTAMP) END
+         WHERE a.id = (
+           SELECT ax.id
+           FROM administracion.soporte_asignaciones ax
+           INNER JOIN administracion.soporte_solicitud_items si ON si.id = ax.id_solicitud_item
+           WHERE si.id_solicitud = $1 AND ax.id_soporte = $2 AND ax.estado = 'ASIGNADA'
+           ORDER BY ax.id DESC LIMIT 1
+         )
          RETURNING a.id`,
         [idSolicitud, idSoporte]
       );
@@ -748,7 +918,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
   }
 
   // OPERADOR: Reasignar técnico guardando justificación en soporte_reasignaciones (Opción A)
-  async reasignarPorOperador(idSolicitud: number, idNuevoTecnico: number, justificacion: string, prioridad?: string): Promise<any> {
+  async reasignarPorOperador(idSolicitud: number, idNuevoTecnico: number, justificacion: string, prioridad?: string, idOperador?: number): Promise<any> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -756,7 +926,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
     try {
       // 1. Buscamos la asignación actual del ticket
       const asignacionActual = await queryRunner.query(
-        `SELECT a.id, a.id_soporte, a.estado, a.prioridad, s.estado as estado_solicitud
+        `SELECT a.id, a.id_soporte, a.estado, a.prioridad, a.id_solicitud_item, a.id_asignado_por, s.estado as estado_solicitud
          FROM administracion.soporte_asignaciones a
          INNER JOIN administracion.soporte_solicitud_items si ON a.id_solicitud_item = si.id
          INNER JOIN administracion.soporte_solicitudes s ON si.id_solicitud = s.id
@@ -782,25 +952,34 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       // 2. Insertamos el historial en administracion.soporte_reasignaciones
       await queryRunner.query(
         `INSERT INTO administracion.soporte_reasignaciones
-         (id_asignacion, id_de_soporte, id_a_soporte, justificacion, fecha)
-         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`,
+         (id_asignacion, id_de_soporte, id_a_soporte, justificacion, fecha, rol_derivacion)
+         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, 'OPERADOR')`,
         [asignacion.id, asignacion.id_soporte, idNuevoTecnico, justificacion]
       );
 
       const prioridadFinal = (prioridad || asignacion.prioridad || 'NORMAL').toUpperCase();
 
-      // 3. Actualizamos el técnico en soporte_asignaciones (desaparece del primer técnico y pasa al nuevo)
+      // 3. Cerramos la asignación anterior y guardamos su tiempo.
       await queryRunner.query(
         `UPDATE administracion.soporte_asignaciones
-         SET id_soporte = $1, fecha_asignacion = CURRENT_TIMESTAMP, estado = 'ASIGNADA', prioridad = $2
-         WHERE id = $3`,
-        [idNuevoTecnico, prioridadFinal, asignacion.id]
+         SET estado = 'DERIVADA', fecha_fin = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [asignacion.id]
+      );
+
+      const nuevaAsignacion = await queryRunner.query(
+        `INSERT INTO administracion.soporte_asignaciones
+          (id_solicitud_item, id_soporte, id_asignado_por, fecha_asignacion, fecha_inicio, fecha_fin, estado, observacion, prioridad)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP, NULL, NULL, 'ASIGNADA', NULL, $4)
+         RETURNING id`,
+        [asignacion.id_solicitud_item, idNuevoTecnico, idOperador || asignacion.id_asignado_por, prioridadFinal]
       );
 
       await queryRunner.commitTransaction();
       return {
         exito: true,
-        idAsignacion: asignacion.id,
+        idAsignacionAnterior: asignacion.id,
+        idAsignacion: Number(nuevaAsignacion[0].id),
         idDeSoporte: asignacion.id_soporte,
         idASoporte: idNuevoTecnico,
       };
@@ -1011,6 +1190,59 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       roles_activos: rolesRestantes,
       estado: rolesRestantes.length > 0,
     };
+  }
+
+  async obtenerConsultoriosPorSede(idSede: number): Promise<any[]> {
+    const query = `
+      SELECT id, numero_consultorio, id_sedes
+      FROM plataforma.consultorio
+      WHERE id_sedes = $1
+        AND estado = true
+      ORDER BY numero_consultorio ASC
+    `;
+    return await this.dataSource.query(query, [idSede]);
+  }
+
+  async obtenerTiposSoporteConOpciones(): Promise<any[]> {
+    return await this.dataSource.query(`
+      SELECT t.id AS id_tipo_soporte, t.nombre AS tipo_nombre, t.estado AS tipo_estado,
+             o.id AS id_opcion, o.nombre AS opcion_nombre, o.estado AS opcion_estado
+      FROM administracion.soporte_tipos t
+      LEFT JOIN administracion.soporte_tipo_opciones o ON o.id_tipo_soporte = t.id
+      WHERE t.estado = true
+      ORDER BY t.id, o.nombre
+    `);
+  }
+
+  async crearOpcionTipoSoporte(idTipoSoporte: number, nombre: string): Promise<any> {
+    const rows = await this.dataSource.query(`
+      INSERT INTO administracion.soporte_tipo_opciones (id_tipo_soporte, nombre)
+      SELECT id, $2 FROM administracion.soporte_tipos WHERE id = $1 AND estado = true
+      RETURNING id, id_tipo_soporte, nombre, estado, created_at, updated_at
+    `, [idTipoSoporte, nombre]);
+    return rows[0] ?? null;
+  }
+
+  async alternarEstadoOpcionTipoSoporte(idOpcion: number, estado: boolean): Promise<any> {
+    const rows = await this.dataSource.query(`
+      UPDATE administracion.soporte_tipo_opciones
+      SET estado = $2, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING id, id_tipo_soporte, nombre, estado, created_at, updated_at
+    `, [idOpcion, estado]);
+    return rows[0] ?? null;
+  }
+
+  async guardarAdjuntoSolicitud(idSolicitud: number, idUsuario: number, archivo: { nombre_archivo: string; ruta_url: string; tipo_mime: string }): Promise<any> {
+    const rows = await this.dataSource.query(`
+      INSERT INTO administracion.soporte_solicitud_adjuntos
+        (id_solicitud, nombre_archivo, ruta_url, tipo_mime)
+      SELECT s.id, $3, $4, $5
+      FROM administracion.soporte_solicitudes s
+      WHERE s.id = $1 AND s.id_usuario = $2
+      RETURNING id, id_solicitud, nombre_archivo, ruta_url, tipo_mime, created_at
+    `, [idSolicitud, idUsuario, archivo.nombre_archivo, archivo.ruta_url, archivo.tipo_mime]);
+    return rows[0] ?? null;
   }
 
 }

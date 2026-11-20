@@ -138,7 +138,7 @@ export const CardTicket = ({ ticket, onPress }: Props) => {
                 <IconoSoporteCircular />
                 <View style={{ flex: 1 }}>
                     <Text style={styles.officeTitle}>
-                        {(ticket.oficina || 'OFICINA').toUpperCase()}
+                        {(ticket.oficina || ticket.consultorio || 'ATENCIÓN DE SOPORTE').toUpperCase()}
                     </Text>
                     <Text style={styles.floorSubtitle}>
                         PISO: {(ticket.piso || 'NO ESPECIFICADO').toUpperCase()}
@@ -176,7 +176,7 @@ export const CardTicket = ({ ticket, onPress }: Props) => {
                 <View style={styles.iconRowItem}>
                     <AppIcon name="pin" size={15} color="#475569" />
                     <Text style={[styles.detailRowText, { marginLeft: 7 }]}>
-                        Ubicación: {ticket.oficina} — {ticket.piso}
+                        Ubicación: {[ticket.oficina, ticket.consultorio, ticket.piso].filter(Boolean).join(' — ')}
                     </Text>
                 </View>
 

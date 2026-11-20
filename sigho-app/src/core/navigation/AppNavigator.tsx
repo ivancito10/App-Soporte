@@ -221,7 +221,7 @@ export const AppNavigator = () => {
                         <Stack.Screen
                             name="TicketDetalle"
                             component={TicketDetalleScreen}
-                            options={{ headerShown: true, title: 'Detalles del Soporte', headerStyle: { backgroundColor: theme.colors.primary }, headerTintColor: '#fff' }}
+                            options={{ headerShown: false }}
                         />
                         <Stack.Screen
                             name="CrearSolicitud"

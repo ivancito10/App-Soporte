@@ -103,20 +103,20 @@ export const SinRolScreen = ({ onLogout, onVerificar }: SinRolScreenProps) => {
 
                     <Text style={styles.greeting}>
                         Hola, <Text style={{ fontWeight: 'bold', color: theme.colors.primary }}>{nombreUsuario}</Text>
-                        {username ? ` (@${username})` : ''}
+                        {/* {username ? ` (@${username})` : ''} */}
                     </Text>
 
                     <View style={styles.messageBox}>
                         <Text style={styles.messageText}>
                             Has ingresado correctamente a tu cuenta, pero{' '}
                             <Text style={{ fontWeight: 'bold', color: '#b45309' }}>
-                                actualmente no tienes ningún rol asignado
+                                actualmente no tienes acceso
                             </Text>{' '}
-                            (Usuario, Operador, Técnico o Administrador).
+                            {/* (Usuario, Operador, Técnico o Administrador). */}
                         </Text>
 
                         <Text style={[styles.messageText, { marginTop: 10 }]}>
-                            Comunícate con el Administrador del sistema para que active los permisos correspondientes a tus funciones.
+                            Comunícate con el Administrador del sistema para que active los permisos correspondientes.
                         </Text>
                     </View>
 

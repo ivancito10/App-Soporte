@@ -4,6 +4,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { multerSoporteConfig } from '../config/multer-soporte.config';
+import { multerAdjuntoSolicitudConfig } from '../config/multer-adjunto-solicitud.config';
 import { AuthGuard } from '@nestjs/passport';
 import { CreateSolicitudUseCase } from '../../application/use-cases/create-solicitud.use-case';
 import { CreateSolicitudDto } from '../../application/dtos/create-solicitud.dto';
@@ -45,7 +46,7 @@ export class SoportesController {
       status: 201,
       success: response.exito,
       message: response.mensaje,
-      data: response.datos
+      data: response.datos ?? response
     };
   }
   @Post('asignar')
@@ -175,6 +176,24 @@ export class SoportesController {
     };
   }
 
+  @Post('solicitud/:id/adjunto')
+  @UseInterceptors(FileInterceptor('archivo', multerAdjuntoSolicitudConfig))
+  async subirAdjuntoSolicitud(
+    @Param('id', ParseIntPipe) idSolicitud: number,
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: any
+  ) {
+    if (!file) throw new BadRequestException('Selecciona una imagen para adjuntar.');
+    if (!String(file.mimetype).startsWith('image/')) throw new BadRequestException('El adjunto debe ser una imagen.');
+    const guardado = await this.soporteRepo.guardarAdjuntoSolicitud(idSolicitud, Number(req.user?.id), {
+      nombre_archivo: file.originalname,
+      ruta_url: `/uploads/soportes/solicitudes/${file.filename}`,
+      tipo_mime: file.mimetype,
+    });
+    if (!guardado) throw new ForbiddenException('La solicitud no existe o no te pertenece.');
+    return { exito: true, datos: guardado };
+  }
+
   @Get('solicitud/:id/items')
   async obtenerItemsSolicitud(@Param('id') id: string) {
     const items = await this.soporteRepo.obtenerItemsDeSolicitud(parseInt(id, 10));
@@ -182,6 +201,12 @@ export class SoportesController {
       exito: true,
       datos: items
     };
+  }
+
+  @Get('solicitud/:id/historial-tecnicos')
+  async obtenerHistorialTecnicos(@Param('id', ParseIntPipe) idSolicitud: number) {
+    const historial = await this.soporteRepo.obtenerHistorialTecnicosSolicitud(idSolicitud);
+    return { exito: true, datos: historial };
   }
 
   @Get('solicitud/:id/acta')
@@ -249,7 +274,8 @@ export class SoportesController {
   @Post('solicitud/:id/reasignar-operador')
   async reasignarPorOperador(
     @Param('id', ParseIntPipe) idSolicitud: number,
-    @Body() body: { idTecnico: number; justificacion: string; prioridad?: string }
+    @Body() body: { idTecnico: number; justificacion: string; prioridad?: string },
+    @Req() req: any
   ) {
     if (!body.idTecnico || !body.justificacion?.trim()) {
       throw new BadRequestException('Debes seleccionar un nuevo técnico e ingresar el motivo de la reasignación.');
@@ -259,7 +285,8 @@ export class SoportesController {
       idSolicitud,
       Number(body.idTecnico),
       body.justificacion.trim(),
-      body.prioridad
+      body.prioridad,
+      Number(req.user?.id)
     );
 
     return {
@@ -328,6 +355,60 @@ export class SoportesController {
       datos: resultado,
       data: resultado,
     };
+  }
+
+  @Get('sedes/:idSede/consultorios')
+  async obtenerConsultoriosPorSede(@Param('idSede') idSede: string) {
+    const datos = await this.soporteRepo.obtenerConsultoriosPorSede(parseInt(idSede, 10));
+    return {
+      exito: true,
+      tiene_consultorios: datos.length > 0,
+      datos,
+    };
+  }
+
+  @Get('tipos-opciones')
+  async obtenerTiposSoporteConOpciones() {
+    const filas = await this.soporteRepo.obtenerTiposSoporteConOpciones();
+    const tipos = new Map<number, any>();
+    for (const fila of filas) {
+      if (!tipos.has(Number(fila.id_tipo_soporte))) {
+        tipos.set(Number(fila.id_tipo_soporte), {
+          id: Number(fila.id_tipo_soporte), nombre: fila.tipo_nombre, opciones: [],
+        });
+      }
+      if (fila.id_opcion !== null) {
+        tipos.get(Number(fila.id_tipo_soporte)).opciones.push({ id: Number(fila.id_opcion), nombre: fila.opcion_nombre, estado: fila.opcion_estado });
+      }
+    }
+    return { exito: true, datos: Array.from(tipos.values()) };
+  }
+
+  @Post('tipos/:idTipo/opciones')
+  async crearOpcionTipoSoporte(
+    @Param('idTipo', ParseIntPipe) idTipo: number,
+    @Body() body: { nombre?: string },
+    @Req() req: any
+  ) {
+    await this.verificarRolAdministrador(req);
+    const nombre = String(body?.nombre || '').trim();
+    if (!nombre || nombre.length > 120) throw new BadRequestException('El nombre es obligatorio y debe tener hasta 120 caracteres.');
+    const opcion = await this.soporteRepo.crearOpcionTipoSoporte(idTipo, nombre);
+    if (!opcion) throw new BadRequestException('La categoría no existe o está inactiva.');
+    return { exito: true, datos: opcion };
+  }
+
+  @Patch('tipos/opciones/:idOpcion/estado')
+  async alternarEstadoOpcionTipoSoporte(
+    @Param('idOpcion', ParseIntPipe) idOpcion: number,
+    @Body() body: { estado?: boolean },
+    @Req() req: any
+  ) {
+    await this.verificarRolAdministrador(req);
+    if (typeof body?.estado !== 'boolean') throw new BadRequestException('El estado debe ser verdadero o falso.');
+    const opcion = await this.soporteRepo.alternarEstadoOpcionTipoSoporte(idOpcion, body.estado);
+    if (!opcion) throw new BadRequestException('La opción no existe.');
+    return { exito: true, datos: opcion };
   }
 
   @Patch('roles/:idUsuario/quitar')

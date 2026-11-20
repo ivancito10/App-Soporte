@@ -1,5 +1,21 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ActivityIndicator, ScrollView, Modal, Image, Linking, Platform, useWindowDimensions } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+    View,
+    Text,
+    StyleSheet,
+    TextInput,
+    TouchableOpacity,
+    Alert,
+    ActivityIndicator,
+    ScrollView,
+    Modal,
+    Image,
+    Linking,
+    Platform,
+    Keyboard,
+    KeyboardAvoidingView,
+    useWindowDimensions,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { theme } from '../../../core/theme/theme';
@@ -17,17 +33,19 @@ import {
     reasignarSoporteOperador,
     obtenerActaSolicitud,
     construirUrlArchivo,
-    obtenerBandeja
+    obtenerBandeja,
+    obtenerHistorialTecnicos,
 } from '../api/soporte.service';
 
-// Opciones de tipos de soporte para el modal (con iconos vectoriales sin emojis)
+// Opciones de tipos de soporte para el modal de añadir problemas
 const TIPOS_SOPORTE: Array<{ id: number; icono: NombreIcono; titulo: string }> = [
-    { id: 1, icono: 'laptop', titulo: 'Equipos físicos' },
-    { id: 2, icono: 'gear', titulo: 'Sistema SIGHO' },
-    { id: 3, icono: 'globe', titulo: 'Redes e Internet' },
+    { id: 1, icono: 'laptop', titulo: 'Problema de Hardware' },
+    { id: 2, icono: 'gear', titulo: 'Sistemas Institucionales' },
+    { id: 3, icono: 'document-text', titulo: 'Programas y ofimáticas' },
+    { id: 4, icono: 'globe', titulo: 'Redes e Internet' },
 ];
 
-// Niveles de prioridad seleccionables por el Operador (usamos puntos de color View nativos para evitar el bug de recorte de emojis 🟠🟢 en fuentes personalizadas de Android)
+// Niveles de prioridad seleccionables
 const NIVELES_PRIORIDAD = [
     { valor: 'URGENTE', etiqueta: 'Urgente', dot: '#e74c3c', color: '#c0392b', bg: '#fdecea' },
     { valor: 'ALTA', etiqueta: 'Alta', dot: '#e67e22', color: '#d35400', bg: '#fef5e7' },
@@ -35,25 +53,47 @@ const NIVELES_PRIORIDAD = [
     { valor: 'BAJA', etiqueta: 'Baja', dot: '#3498db', color: '#2980b9', bg: '#ebf5fb' },
 ];
 
+const obtenerEstiloEstado = (estado?: string) => {
+    switch (estado) {
+        case 'FINALIZADA':
+            return { texto: 'FINALIZADA', color: '#15803d', bg: '#dcfce7', border: '#bbf7d0' };
+        case 'EN_PROCESO':
+            return { texto: 'EN PROCESO', color: '#6d28d9', bg: '#f3e8ff', border: '#e9d5ff' };
+        case 'ASIGNADA':
+            return { texto: 'ASIGNADA', color: '#1d4ed8', bg: '#dbeafe', border: '#bfdbfe' };
+        case 'PENDIENTE':
+        default:
+            return { texto: 'PENDIENTE', color: '#b45309', bg: '#fef3c7', border: '#fde68a' };
+    }
+};
+
+const obtenerInfoPrioridad = (prioridad?: string) => {
+    const p = (prioridad || '').toUpperCase();
+    if (p === 'URGENTE') return { texto: 'URGENTE', dot: '#e74c3c', color: '#c0392b', bg: '#fdecea' };
+    if (p === 'ALTA') return { texto: 'ALTA', dot: '#e67e22', color: '#d35400', bg: '#fef5e7' };
+    if (p === 'NORMAL') return { texto: 'NORMAL', dot: '#2ecc71', color: '#27ae60', bg: '#eafaf1' };
+    if (p === 'BAJA') return { texto: 'BAJA', dot: '#3498db', color: '#2980b9', bg: '#ebf5fb' };
+    return null;
+};
+
 const formatearFechaHora = (fechaIso?: string) => {
     if (!fechaIso) return 'No registrada';
     const d = new Date(fechaIso);
     if (isNaN(d.getTime())) return 'No registrada';
     const fecha = d.toLocaleDateString('es-BO', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const hora = d.toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    return `${fecha} — ${hora}`;
+    const hora = d.toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' });
+    return `${fecha}  •  ${hora}`;
 };
 
-// Función auxiliar para mostrar el texto e icono en lugar del ID numérico
 const obtenerInfoTipoSoporte = (idTipo: number | string): { icono: NombreIcono; nombre: string } => {
     const id = Number(idTipo);
-    if (id === 1) return { icono: 'laptop', nombre: 'Equipos físicos' };
-    if (id === 2) return { icono: 'gear', nombre: 'Sistema SIGHO' };
-    if (id === 3) return { icono: 'globe', nombre: 'Redes e Internet' };
+    if (id === 1) return { icono: 'laptop', nombre: 'Problema de Hardware' };
+    if (id === 2) return { icono: 'gear', nombre: 'Sistemas Institucionales' };
+    if (id === 3) return { icono: 'document-text', nombre: 'Programas y ofimáticas' };
+    if (id === 4) return { icono: 'globe', nombre: 'Redes e Internet' };
     return { icono: 'wrench', nombre: 'Otro' };
 };
 
-// Función auxiliar para formatear segundos en "Xh Ym Zs" o "Ym Zs"
 const formatearSegundos = (totalSegundos: number) => {
     const segs = Math.max(0, Math.floor(totalSegundos));
     const horas = Math.floor(segs / 3600);
@@ -70,11 +110,11 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
     const { width } = useWindowDimensions();
     const insets = useSafeAreaInsets();
     const esEscritorio = Platform.OS === 'web' && width > 768;
-    const paddingInferiorSeguro = Platform.OS === 'web' ? 40 : Math.max(insets.bottom, 48) + 32;
 
-    const { ticket: ticketInicial, rolUsuario } = route.params as { ticket: TicketSoporte, rolUsuario: RolBandeja };
+    const { ticket: ticketInicial, rolUsuario } = route.params as { ticket: TicketSoporte; rolUsuario: RolBandeja };
+    const scrollViewRef = useRef<React.ElementRef<typeof ScrollView>>(null);
     const [ticket, setTicket] = useState<TicketSoporte>(ticketInicial);
-    const idReal = (ticket.id || ticket.id_solicitud) as number; // Usamos el ID seguro
+    const idReal = Number(ticket.id || ticket.id_solicitud);
 
     const [estadoActual, setEstadoActual] = useState<string>(ticket.estado);
 
@@ -87,18 +127,18 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
     const [diagnostico, setDiagnostico] = useState('');
 
     const [tecnicos, setTecnicos] = useState<any[]>([]);
-    // idTecnico cambiará a número en lugar de string vacío
     const [idTecnico, setIdTecnico] = useState<number | null>(null);
     const [prioridad, setPrioridad] = useState<string>(
         ticketInicial.prioridad ? ticketInicial.prioridad.toUpperCase() : 'NORMAL'
     );
 
+    // Modal añadir otro problema
     const [modalVisible, setModalVisible] = useState(false);
     const [nuevoTipoSoporte, setNuevoTipoSoporte] = useState<number>(1);
     const [nuevaDescripcion, setNuevaDescripcion] = useState('');
     const [guardandoItem, setGuardandoItem] = useState(false);
 
-    // ESTADOS DEL TÉCNICO: 2 Cronómetros (Desde Asignación y Desde Inicio En Proceso), Derivación y Acta
+    // Estados del Técnico (Cronómetros, Derivación, Acta)
     const [tiempoDesdeAsignacion, setTiempoDesdeAsignacion] = useState<string>('Calculando...');
     const [tiempoEnProceso, setTiempoEnProceso] = useState<string>('No iniciado');
     const [baseSegundosInicio, setBaseSegundosInicio] = useState<number | null>(
@@ -108,56 +148,73 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
     );
     const [timestampInicioLocal, setTimestampInicioLocal] = useState<number>(() => Date.now());
     const [modalReasignarVisible, setModalReasignarVisible] = useState(false);
+    const [modalHistorialTecnicosVisible, setModalHistorialTecnicosVisible] = useState(false);
+    const [historialTecnicos, setHistorialTecnicos] = useState<any[]>([]);
     const [idNuevoTecnico, setIdNuevoTecnico] = useState<number | null>(null);
     const [motivoDerivacion, setMotivoDerivacion] = useState('');
     const [guardandoReasignacion, setGuardandoReasignacion] = useState(false);
     const [archivoActaUri, setArchivoActaUri] = useState<string | null>(null);
     const [nombreArchivoActa, setNombreArchivoActa] = useState<string>('');
 
-    // ESTADO PARA VER EL ACTA SUBIDA (administracion.soporte_archivos_actas)
+    // Estado para ver el acta subida
     const [rutaActaGuardada, setRutaActaGuardada] = useState<string | null>(ticket.url_acta || null);
     const [nombreActaGuardada, setNombreActaGuardada] = useState<string>(ticket.nombre_archivo_acta || '');
     const [tipoMimeActaGuardada, setTipoMimeActaGuardada] = useState<string>(ticket.tipo_mime_acta || '');
     const [modalVerActaVisible, setModalVerActaVisible] = useState<boolean>(false);
 
-    // CARGAMOS LOS DETALLES DEL TICKET Y TÉCNICOS AL ENTRAR A LA PANTALLA + SINCRONIZACIÓN EN TIEMPO REAL
+    // Detección de teclado para ocultar ondas inferiores
+    const [tecladoVisible, setTecladoVisible] = useState(false);
+
+    useEffect(() => {
+        const showSub = Keyboard.addListener('keyboardDidShow', () => setTecladoVisible(true));
+        const hideSub = Keyboard.addListener('keyboardDidHide', () => setTecladoVisible(false));
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
+    }, []);
+
+    // Carga de ítems y sincronización en tiempo real
     useEffect(() => {
         const cargarDatos = async () => {
             if (idReal) {
                 const items = await obtenerDetallesSolicitud(idReal);
-                setItemsProblema(items);
+                setItemsProblema(Array.isArray(items) ? items : []);
 
-                // Si el soporte está finalizado, consultamos soporte_archivos_actas para asegurar tener ruta_url
+                if (rolUsuario === RolBandeja.TECNICO && Number(ticket.cantidad_reasignaciones || 0) > 0) {
+                    try {
+                        const historial = await obtenerHistorialTecnicos(idReal);
+                        setHistorialTecnicos(Array.isArray(historial) ? historial : []);
+                    } catch (error) {
+                        console.error('Error al cargar el historial de técnicos:', error);
+                    }
+                }
+
                 if (estadoActual === 'FINALIZADA') {
                     const acta = await obtenerActaSolicitud(idReal);
-                    if (acta && acta.ruta_url) {
+                    if (acta?.ruta_url) {
                         setRutaActaGuardada(acta.ruta_url);
                         setNombreActaGuardada(acta.nombre_archivo || '');
                         setTipoMimeActaGuardada(acta.tipo_mime || '');
                     }
                 }
             }
-            // Cargar lista de técnicos tanto para OPERADOR como para TÉCNICO (para poder derivar)
             if (rolUsuario === RolBandeja.OPERADOR || rolUsuario === RolBandeja.TECNICO) {
                 const listaTecnicos = await obtenerTecnicos();
-                setTecnicos(listaTecnicos);
+                setTecnicos(Array.isArray(listaTecnicos) ? listaTecnicos : []);
             }
             setCargandoItems(false);
         };
         cargarDatos();
 
-        // Sincronización automática en segundo plano cada 4 segundos mientras el soporte no haya concluido
         const intervaloSync = setInterval(async () => {
             try {
                 if (!idReal) return;
-
-                // 1. Refrescar ítems del problema por si el usuario añadió uno nuevo
                 const itemsActualizados = await obtenerDetallesSolicitud(idReal);
                 if (Array.isArray(itemsActualizados)) {
                     setItemsProblema(itemsActualizados);
                 }
 
-                // 2. Refrescar el estado y datos del ticket desde la bandeja del rol actual
                 const respuestaBandeja = await obtenerBandeja({ rol: rolUsuario });
                 const lista = respuestaBandeja?.data || respuestaBandeja?.datos || respuestaBandeja || [];
                 if (Array.isArray(lista)) {
@@ -182,16 +239,13 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                         }
                     }
                 }
-            } catch (_e) {
-                // Ignoramos errores silenciosos de red durante el polling
-            }
+            } catch (_e) {}
         }, 4000);
 
         return () => clearInterval(intervaloSync);
     }, [idReal, rolUsuario, estadoActual, baseSegundosInicio]);
 
-    // 2 CRONÓMETROS EN TIEMPO REAL (1: Desde fecha_asignacion | 2: Desde fecha_inicio)
-    // Ambos corren en tiempo real y SOLO se detienen cuando el soporte está en FINALIZADA
+    // 2 Cronómetros en tiempo real
     useEffect(() => {
         const montoPantallaMs = Date.now();
         const segAsignacionBase =
@@ -217,14 +271,12 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             const ahora = Date.now();
             const deltaSegundos = Math.floor((ahora - montoPantallaMs) / 1000);
 
-            // Reloj 1: Desde que fue asignado (nunca se detiene al poner En Proceso, solo al finalizar)
             if (segAsignacionBase !== null) {
                 setTiempoDesdeAsignacion(formatearSegundos(segAsignacionBase + deltaSegundos));
             } else {
                 setTiempoDesdeAsignacion('Sin asignación');
             }
 
-            // Reloj 2: Desde que el técnico puso En Proceso (fecha_inicio)
             if (baseSegundosInicio !== null) {
                 const deltaInicio = Math.floor((ahora - timestampInicioLocal) / 1000);
                 setTiempoEnProceso(formatearSegundos(baseSegundosInicio + deltaInicio));
@@ -241,6 +293,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
         return () => clearInterval(intervalo);
     }, [ticket.fecha_asignacion, ticket.fecha_inicio, ticket.segundos_desde_asignacion, estadoActual, baseSegundosInicio, timestampInicioLocal]);
 
+    // Acciones
     const handleAgregarItem = async () => {
         if (!nuevaDescripcion.trim()) {
             return Alert.alert('Error', 'Debes describir el problema.');
@@ -250,20 +303,18 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
         try {
             await agregarItemSoporte(idReal, {
                 id_tipo_soporte: nuevoTipoSoporte,
-                descripcion: nuevaDescripcion.trim()
+                descripcion: nuevaDescripcion.trim(),
             });
 
             Alert.alert('Éxito', 'Se añadió el problema a tu ticket.');
             setModalVisible(false);
             setNuevaDescripcion('');
 
-            // Recargamos la lista de problemas para que aparezca el nuevo
             setCargandoItems(true);
             const itemsRefresh = await obtenerDetallesSolicitud(idReal);
-            setItemsProblema(itemsRefresh);
+            setItemsProblema(Array.isArray(itemsRefresh) ? itemsRefresh : []);
             setCargandoItems(false);
-
-        } catch (error) {
+        } catch (_error) {
             Alert.alert('Error', 'No se pudo añadir el problema.');
         } finally {
             setGuardandoItem(false);
@@ -275,7 +326,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
         try {
             await resolicitarSoporte(idReal, observacion);
             setObservacion('');
-            // Volvemos inmediatamente a la pantalla principal (Bandeja)
+            Alert.alert('Éxito', 'Tu solicitud de insistencia ha sido enviada.');
             navigation.goBack();
         } catch (error: any) {
             console.error('Error al resolicitar soporte:', error);
@@ -310,7 +361,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             return;
         }
         if (!justificacionReasignacion.trim()) {
-            Alert.alert('Atención', 'Debes escribir el motivo por el cual estás seleccionando al nuevo técnico.');
+            Alert.alert('Atención', 'Debes escribir el motivo por el cual estás reasignando.');
             return;
         }
 
@@ -332,11 +383,10 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
         setCargando(true);
         try {
             await ponerEnProcesoSoporte(Number(idReal));
-            // Actualizamos en vivo en la pantalla sin detener el primer cronómetro y arrancando el segundo desde 0m 0s
             setEstadoActual('EN_PROCESO');
             setTimestampInicioLocal(Date.now());
             setBaseSegundosInicio(0);
-            Alert.alert('En Proceso', 'Has iniciado la atención del soporte. El segundo cronómetro ha comenzado a correr y ambos se detendrán únicamente al finalizar.');
+            Alert.alert('En Proceso', 'Has iniciado la atención del soporte.');
         } catch (error: any) {
             console.error('Error al poner en proceso:', error);
             Alert.alert('Error', 'No se pudo cambiar el estado a En Proceso.');
@@ -345,19 +395,18 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
         }
     };
 
-    // TÉCNICO: Derivar soporte a otro técnico con justificación obligatoria
     const handleDerivarTecnico = async () => {
         if (!idNuevoTecnico) {
             Alert.alert('Atención', 'Debes seleccionar al técnico al que deseas derivar el soporte.');
             return;
         }
         if (!motivoDerivacion.trim()) {
-            Alert.alert('Atención', 'La justificación de la reasignación es obligatoria.');
+            Alert.alert('Atención', 'La justificación de la derivación es obligatoria.');
             return;
         }
         const idAsignacion = ticket.id_asignacion;
         if (!idAsignacion) {
-            Alert.alert('Error', 'No se encontró el identificador de asignación de este ticket.');
+            Alert.alert('Error', 'No se encontró el identificador de asignación.');
             return;
         }
 
@@ -366,7 +415,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             await reasignarSoporte(Number(idAsignacion), Number(idNuevoTecnico), motivoDerivacion.trim());
             setModalReasignarVisible(false);
             setMotivoDerivacion('');
-            Alert.alert('Soporte Derivado', 'El soporte ha sido derivado exitosamente al otro técnico.');
+            Alert.alert('Soporte Derivado', 'El soporte ha sido derivado exitosamente.');
             navigation.goBack();
         } catch (error: any) {
             console.error('Error al derivar soporte:', error);
@@ -377,34 +426,47 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
         }
     };
 
-    // TÉCNICO: Seleccionar imagen/foto del acta
-    const handleSeleccionarActa = async () => {
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: false,
-            quality: 0.8,
-        });
+    const handleSeleccionarActa = async (usarCamara: boolean) => {
+        try {
+            if (usarCamara) {
+                const permiso = await ImagePicker.requestCameraPermissionsAsync();
+                if (!permiso.granted) {
+                    Alert.alert('Permiso requerido', 'Permite el acceso a la cámara para tomar la foto del acta.');
+                    return;
+                }
+            } else {
+                const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                if (!permiso.granted) {
+                    Alert.alert('Permiso requerido', 'Permite el acceso a la galería para seleccionar la foto del acta.');
+                    return;
+                }
+            }
+            const result = usarCamara
+                ? await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: false, quality: 0.8 })
+                : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: false, quality: 0.8 });
 
-        if (!result.canceled && result.assets && result.assets.length > 0) {
-            const asset = result.assets[0];
-            setArchivoActaUri(asset.uri);
-            setNombreArchivoActa(asset.fileName || 'acta_soporte.jpg');
+            if (!result.canceled && result.assets && result.assets.length > 0) {
+                const asset = result.assets[0];
+                setArchivoActaUri(asset.uri);
+                setNombreArchivoActa(asset.fileName || 'acta_soporte.jpg');
+            }
+        } catch (error) {
+            Alert.alert('Error', usarCamara ? 'No se pudo abrir la cámara.' : 'No se pudo abrir la galería.');
         }
     };
 
-    // TÉCNICO: Subir acta y finalizar soporte
     const handleFinalizar = async () => {
         if (!archivoActaUri) {
-            Alert.alert('Acta requerida', 'Debes adjuntar la imagen/foto del Acta de Soporte para poder finalizar.');
+            Alert.alert('Acta requerida', 'Debes adjuntar la imagen/foto del Acta de Soporte para finalizar.');
             return;
         }
         if (!diagnostico.trim()) {
-            Alert.alert('Diagnóstico requerido', 'Debes escribir el diagnóstico u observación del trabajo realizado antes de finalizar.');
+            Alert.alert('Diagnóstico requerido', 'Debes escribir el diagnóstico u observación del trabajo realizado.');
             return;
         }
         const idAsignacion = ticket.id_asignacion;
         if (!idAsignacion) {
-            Alert.alert('Error', 'No se encontró el ID de asignación de este soporte.');
+            Alert.alert('Error', 'No se encontró el ID de asignación.');
             return;
         }
 
@@ -422,649 +484,673 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
         }
     };
 
+    // Fechas formateadas
+    const fechaRaw = ticket.fecha_solicitud || (ticket as any).creado_en || (ticket as any).fecha_creacion;
+    const fechaObj = fechaRaw ? new Date(fechaRaw) : null;
+    const fechaSolicitud = fechaObj && !isNaN(fechaObj.getTime())
+        ? fechaObj.toLocaleDateString('es-BO', { day: '2-digit', month: '2-digit', year: 'numeric' })
+        : 'Hoy';
+    const horaSolicitud = fechaObj && !isNaN(fechaObj.getTime())
+        ? fechaObj.toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })
+        : 'Reciente';
+
+    const estiloEstado = obtenerEstiloEstado(estadoActual);
+    const infoPrioridad = obtenerInfoPrioridad(ticket.prioridad || prioridad);
+
     return (
-        <ScrollView
-            style={styles.container}
-            contentContainerStyle={esEscritorio ? { width: '100%', maxWidth: 820, alignSelf: 'center', paddingBottom: 40 } : { paddingBottom: paddingInferiorSeguro }}
-        >
-            {/* CABECERA DEL TICKET */}
-            <View style={styles.cardHeader}>
-                <Text style={styles.title}>Ticket #{idReal}</Text>
-                <Text style={styles.subtitle}>Oficina: {ticket.oficina} | Piso: {ticket.piso}</Text>
-                <Text style={[
-                    styles.status,
-                    {
-                        color: estadoActual === 'FINALIZADA'
-                            ? '#27ae60'
-                            : estadoActual === 'EN_PROCESO'
-                                ? '#8e44ad'
-                                : estadoActual === 'ASIGNADA'
-                                    ? '#3498db'
-                                    : '#f39c12'
-                    }
-                ]}>
-                    Estado actual: {estadoActual === 'EN_PROCESO' ? 'EN PROCESO' : estadoActual}
-                </Text>
-                {Boolean(ticket.prioridad) && (() => {
-                    const pUpper = (ticket.prioridad || 'NORMAL').toUpperCase();
-                    const pInfo = NIVELES_PRIORIDAD.find((item) => item.valor === pUpper) || NIVELES_PRIORIDAD[2];
-                    return (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
-                            <Text style={{ fontWeight: 'bold', fontSize: 13, color: '#555', marginRight: 6 }}>
-                                Nivel de Prioridad:
-                            </Text>
-                            <View style={{
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                backgroundColor: pInfo.bg,
-                                borderWidth: 1,
-                                borderColor: pInfo.color,
-                                paddingHorizontal: 8,
-                                paddingVertical: 2,
-                                borderRadius: 4,
-                            }}>
-                                <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: pInfo.dot, marginRight: 5 }} />
-                                <Text style={{ fontWeight: 'bold', fontSize: 12, color: pInfo.color }}>
-                                    {pInfo.valor}
-                                </Text>
-                            </View>
-                        </View>
-                    );
-                })()}
-                {estadoActual === 'EN_PROCESO' && (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
-                        <AppIcon name="wrench" size={15} color="#8e44ad" />
-                        <Text style={{ marginLeft: 6, color: '#8e44ad', fontWeight: 'bold', fontSize: 14 }}>
-                            En proceso por el técnico: {ticket.nombre_tecnico || 'Técnico asignado'}
-                        </Text>
-                    </View>
-                )}
-                {ticket.ultima_reasignacion_motivo && (
-                    <View style={{ marginTop: 10, padding: 10, backgroundColor: '#fff8e1', borderRadius: 6, borderLeftWidth: 4, borderLeftColor: '#f39c12' }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <AppIcon name="refresh" size={14} color="#d35400" />
-                            <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#d35400', marginLeft: 6 }}>
-                                Ticket Reasignado / Derivado
-                            </Text>
-                        </View>
-                        <Text style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
-                            Motivo: {ticket.ultima_reasignacion_motivo}
-                        </Text>
-                    </View>
-                )}
-                {Number(ticket.cantidad_resolicitudes || 0) > 0 && estadoActual !== 'FINALIZADA' && (
-                    <View style={{ marginTop: 10, padding: 10, backgroundColor: '#fdecea', borderRadius: 6, borderLeftWidth: 4, borderLeftColor: '#e74c3c' }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <AppIcon name="alert" size={14} color="#c0392b" />
-                            <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#c0392b', marginLeft: 6, flex: 1 }}>
-                                Insistencia: El usuario de {ticket.oficina} {ticket.piso ? `(${ticket.piso})` : ''} requiere atención demorada
-                            </Text>
-                        </View>
-                        {ticket.ultima_resolicitud_motivo && (
-                            <Text style={{ fontSize: 13, color: '#922b21', marginTop: 2 }}>
-                                Mensaje del usuario: "{ticket.ultima_resolicitud_motivo}"
-                            </Text>
-                        )}
-                    </View>
-                )}
-            </View>
-
-            {/* NUEVA SECCIÓN: DETALLES DEL PROBLEMA */}
-            <View style={styles.itemsSection}>
-                <Text style={styles.sectionTitle}>Problemas Reportados</Text>
-
-                {cargandoItems ? (
-                    <ActivityIndicator size="small" color={theme.colors.primary} style={{ marginTop: 10 }} />
-                ) : itemsProblema.length > 0 ? (
-                    itemsProblema.map((item, index) => {
-                        const infoTipo = obtenerInfoTipoSoporte(item.id_tipo_soporte);
-                        return (
-                            <View key={index} style={styles.itemBox}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                                    <AppIcon name={infoTipo.icono} size={17} color="#164a96" />
-                                    <Text style={[styles.itemType, { marginBottom: 0, marginLeft: 7 }]}>{infoTipo.nombre}</Text>
-                                </View>
-                                <Text style={styles.itemDesc}>{item.descripcion}</Text>
-                            </View>
-                        );
-                    })
-                ) : (
-                    <Text style={styles.emptyItemsText}>No se pudieron cargar los detalles del problema.</Text>
-                )}
-            </View>
-
-            {/* 1. Vista de USUARIO */}
-            {rolUsuario === RolBandeja.USUARIO && ticket.estado !== 'FINALIZADA' && (
-                <View style={styles.actionSection}>
-                    <Text style={styles.sectionTitle}>¿Atención demorada?</Text>
-                    <TextInput
-                        style={styles.input}
-                        placeholder="Escribe el motivo de tu insistencia (opcional)..."
-                        value={observacion}
-                        onChangeText={setObservacion}
-                        multiline
-                    />
-
-                    <TouchableOpacity style={[styles.button, { backgroundColor: '#e67e22', flexDirection: 'row', justifyContent: 'center', gap: 8 }]} onPress={handleResolicitar} disabled={cargando}>
-                        {cargando ? (
-                            <ActivityIndicator color="#FFF" />
-                        ) : (
-                            <>
-                                <AppIcon name="bell" size={17} color="#ffffff" />
-                                <Text style={styles.buttonText}>Re-solicitar / Insistir</Text>
-                            </>
-                        )}
-                    </TouchableOpacity>
-
-                    {/* BOTÓN QUE ABRE EL MODAL */}
+        <View style={styles.screenWrapper}>
+            {/* 1. CABECERA FIJA SUPERIOR AZUL INSTITUCIONAL CON ONDAS */}
+            <View style={[styles.topHeader, { paddingTop: Platform.OS === 'web' ? 14 : Math.max(insets.top, 14) + 6 }]}>
+                <View style={[styles.topBarRow, esEscritorio && { maxWidth: 880, alignSelf: 'center' }]}>
                     <TouchableOpacity
-                        style={styles.addMoreButton}
-                        onPress={() => setModalVisible(true)}
+                        style={styles.backButton}
+                        onPress={() => navigation.goBack()}
+                        activeOpacity={0.75}
                     >
-                        <Text style={styles.addMoreButtonText}>+ Añadir otro problema a esta solicitud</Text>
+                        <AppIcon name="arrow-left" size={20} color="#ffffff" />
                     </TouchableOpacity>
-                </View>
-            )}
 
-            {/* 2A. Vista de OPERADOR: Primera asignación (Ticket PENDIENTE) */}
-            {rolUsuario === RolBandeja.OPERADOR && ticket.estado === 'PENDIENTE' && (
-                <View style={styles.actionSection}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                        <AppIcon name="user" size={18} color="#333" />
-                        <Text style={[styles.sectionTitle, { marginBottom: 0, marginLeft: 7 }]}>Asignar a Técnico</Text>
-                    </View>
-
-                    <Text style={styles.label}>Selecciona el nivel de prioridad:</Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 12 }}>
-                        {NIVELES_PRIORIDAD.map((p) => {
-                            const activo = prioridad === p.valor;
-                            return (
-                                <TouchableOpacity
-                                    key={p.valor}
-                                    style={{
-                                        width: '48.5%',
-                                        marginBottom: 8,
-                                        paddingVertical: 10,
-                                        paddingHorizontal: 10,
-                                        borderRadius: 6,
-                                        borderWidth: activo ? 2 : 1,
-                                        borderColor: activo ? p.color : '#ddd',
-                                        backgroundColor: activo ? p.bg : '#f9f9f9',
-                                        flexDirection: 'row',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                    }}
-                                    onPress={() => setPrioridad(p.valor)}
-                                >
-                                    <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: p.dot, marginRight: 7 }} />
-                                    <Text style={{
-                                        fontWeight: 'bold',
-                                        fontSize: 14,
-                                        color: activo ? p.color : '#444',
-                                    }}>
-                                        {p.etiqueta}
-                                    </Text>
-                                </TouchableOpacity>
-                            );
-                        })}
-                    </View>
-
-                    <Text style={styles.label}>Selecciona el técnico disponible:</Text>
-
-                    {tecnicos.length === 0 ? (
-                        <ActivityIndicator color={theme.colors.primary} />
-                    ) : (
-                        <View style={{ marginBottom: 16 }}>
-                            {tecnicos.map(tec => (
-                                <TouchableOpacity
-                                    key={tec.id}
-                                    style={[
-                                        styles.itemBox,
-                                        { flexDirection: 'row', alignItems: 'center' },
-                                        idTecnico === tec.id && { borderColor: theme.colors.primary, backgroundColor: '#eef2f9' }
-                                    ]}
-                                    onPress={() => setIdTecnico(tec.id)}
-                                >
-                                    <AppIcon name="user" size={16} color={idTecnico === tec.id ? theme.colors.primary : '#333'} />
-                                    <Text style={{ fontWeight: 'bold', color: idTecnico === tec.id ? theme.colors.primary : '#333', marginLeft: 8 }}>
-                                        {tec.nombre}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    )}
-
-                    <TouchableOpacity
-                        style={[styles.button, { backgroundColor: theme.colors.primary, opacity: idTecnico ? 1 : 0.5, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
-                        onPress={handleAsignar}
-                        disabled={cargando || !idTecnico}
-                    >
-                        {cargando ? (
-                            <ActivityIndicator color="#FFF" />
-                        ) : (
-                            <>
-                                <Text style={styles.buttonText}>Asignar Ticket</Text>
-                                <AppIcon name="arrow-right" size={18} color="#ffffff" />
-                            </>
-                        )}
-                    </TouchableOpacity>
-                </View>
-            )}
-
-            {/* 2B. Vista de OPERADOR: Reasignar Técnico (Ticket ASIGNADA pero aún no EN_PROCESO) */}
-            {rolUsuario === RolBandeja.OPERADOR && ticket.estado === 'ASIGNADA' && (
-                <View style={styles.actionSection}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                        <AppIcon name="refresh" size={18} color="#333" />
-                        <Text style={[styles.sectionTitle, { marginBottom: 0, marginLeft: 7 }]}>Reasignar a otro Técnico</Text>
-                    </View>
-
-                    <View style={[styles.itemBox, { backgroundColor: '#eef7fc', borderColor: '#3498db', marginBottom: 14 }]}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <AppIcon name="user" size={15} color="#2980b9" />
-                            <Text style={{ fontSize: 13, color: '#2980b9', fontWeight: 'bold', marginLeft: 6 }}>
-                                Técnico asignado actualmente: {ticket.nombre_tecnico || 'Técnico'}
-                            </Text>
-                        </View>
-                        <Text style={{ fontSize: 12, color: '#555', marginTop: 4 }}>
-                            El técnico aún no ha puesto el soporte en proceso. Si necesitas cambiarlo, indica el motivo y selecciona al nuevo técnico:
-                        </Text>
-                    </View>
-
-                    <Text style={styles.label}>1. Motivo por el que se cambia de técnico *</Text>
-                    <TextInput
-                        style={styles.input}
-                        placeholder="Escribe por qué se está seleccionando al nuevo técnico..."
-                        value={justificacionReasignacion}
-                        onChangeText={setJustificacionReasignacion}
-                        multiline
-                    />
-
-                    <Text style={styles.label}>2. Nivel de prioridad del soporte:</Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 12 }}>
-                        {NIVELES_PRIORIDAD.map((p) => {
-                            const activo = prioridad === p.valor;
-                            return (
-                                <TouchableOpacity
-                                    key={p.valor}
-                                    style={{
-                                        width: '48.5%',
-                                        marginBottom: 8,
-                                        paddingVertical: 10,
-                                        paddingHorizontal: 10,
-                                        borderRadius: 6,
-                                        borderWidth: activo ? 2 : 1,
-                                        borderColor: activo ? p.color : '#ddd',
-                                        backgroundColor: activo ? p.bg : '#f9f9f9',
-                                        flexDirection: 'row',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                    }}
-                                    onPress={() => setPrioridad(p.valor)}
-                                >
-                                    <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: p.dot, marginRight: 7 }} />
-                                    <Text style={{
-                                        fontWeight: 'bold',
-                                        fontSize: 14,
-                                        color: activo ? p.color : '#444',
-                                    }}>
-                                        {p.etiqueta}
-                                    </Text>
-                                </TouchableOpacity>
-                            );
-                        })}
-                    </View>
-
-                    <Text style={styles.label}>3. Selecciona al nuevo técnico disponible:</Text>
-                    {tecnicos.length === 0 ? (
-                        <ActivityIndicator color={theme.colors.primary} />
-                    ) : (
-                        <View style={{ marginBottom: 16 }}>
-                            {tecnicos.map(tec => {
-                                const esActual = (ticket.id_tecnico && Number(tec.id) === Number(ticket.id_tecnico)) ||
-                                    (ticket.nombre_tecnico && tec.nombre === ticket.nombre_tecnico);
-                                return (
-                                    <TouchableOpacity
-                                        key={tec.id}
-                                        disabled={Boolean(esActual)}
-                                        style={[
-                                            styles.itemBox,
-                                            { flexDirection: 'row', alignItems: 'center' },
-                                            esActual && { opacity: 0.5, backgroundColor: '#eee' },
-                                            idTecnico === tec.id && { borderColor: theme.colors.primary, backgroundColor: '#eef2f9' }
-                                        ]}
-                                        onPress={() => setIdTecnico(tec.id)}
-                                    >
-                                        <AppIcon name="user" size={16} color={idTecnico === tec.id ? theme.colors.primary : '#333'} />
-                                        <Text style={{ fontWeight: 'bold', color: idTecnico === tec.id ? theme.colors.primary : '#333', marginLeft: 8 }}>
-                                            {tec.nombre} {esActual ? '(Asignado actualmente)' : ''}
-                                        </Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </View>
-                    )}
-
-                    <TouchableOpacity
-                        style={[
-                            styles.button,
-                            {
-                                backgroundColor: '#e67e22',
-                                opacity: idTecnico && justificacionReasignacion.trim() ? 1 : 0.5,
-                                flexDirection: 'row',
-                                justifyContent: 'center',
-                                gap: 8,
-                            }
-                        ]}
-                        onPress={handleReasignarOperador}
-                        disabled={cargando || !idTecnico || !justificacionReasignacion.trim()}
-                    >
-                        {cargando ? (
-                            <ActivityIndicator color="#FFF" />
-                        ) : (
-                            <>
-                                <AppIcon name="refresh" size={17} color="#ffffff" />
-                                <Text style={styles.buttonText}>Confirmar Reasignación</Text>
-                            </>
-                        )}
-                    </TouchableOpacity>
-                </View>
-            )}
-
-            {/* 2C. Vista de OPERADOR: Bloqueado cuando el técnico ya puso el soporte EN_PROCESO */}
-            {rolUsuario === RolBandeja.OPERADOR && ticket.estado === 'EN_PROCESO' && (
-                <View style={[styles.actionSection, { borderLeftWidth: 4, borderLeftColor: '#8e44ad' }]}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-                        <AppIcon name="wrench" size={18} color="#8e44ad" />
-                        <Text style={[styles.sectionTitle, { color: '#8e44ad', marginBottom: 0, marginLeft: 7 }]}>Soporte En Proceso</Text>
-                    </View>
-                    <Text style={{ color: '#444', fontSize: 14, lineHeight: 20 }}>
-                        Este soporte está siendo atendido actualmente por el técnico{' '}
-                        <Text style={{ fontWeight: 'bold', color: '#8e44ad' }}>
-                            {ticket.nombre_tecnico || 'asignado'}
-                        </Text>
-                        . No es posible reasignarlo a otro técnico mientras se encuentra en proceso.
+                    <Text style={styles.navBarTitle} numberOfLines={1}>
+                        Detalle del Soporte
                     </Text>
+
+                    <View style={styles.headerSpacerRight} />
                 </View>
-            )}
 
-            {/* NUEVO: VISTA DE HISTORIAL PARA OPERADOR Y TÉCNICO (Tickets Concluidos) */}
-            {(rolUsuario === RolBandeja.OPERADOR || rolUsuario === RolBandeja.TECNICO) && estadoActual === 'FINALIZADA' && (
-                <View style={styles.actionSection}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                        <AppIcon name="clipboard" size={18} color="#333" />
-                        <Text style={[styles.sectionTitle, { marginBottom: 0, marginLeft: 7 }]}>Acta de Soporte (Historial Concluido)</Text>
-                    </View>
+                {/* Onda superior curva en la base del header */}
+                <Image
+                    source={require('../../../../assets/ondas-superiores.png')}
+                    style={styles.headerBottomWave}
+                    resizeMode="stretch"
+                />
+            </View>
 
-                    <View style={styles.itemBox}>
-                        <Text style={styles.label}>Técnico Asignado:</Text>
-                        <Text style={{ marginBottom: 10, color: '#333', fontWeight: 'bold' }}>{ticket.nombre_tecnico || 'Técnico'}</Text>
-
-                        <Text style={styles.label}>Hora de Asignación:</Text>
-                        <Text style={{ marginBottom: 10, color: '#2980b9', fontWeight: 'bold' }}>{formatearFechaHora(ticket.fecha_asignacion)}</Text>
-
-                        <Text style={styles.label}>Hora de Inicio En Proceso:</Text>
-                        <Text style={{ marginBottom: 10, color: '#8e44ad', fontWeight: 'bold' }}>{formatearFechaHora(ticket.fecha_inicio)}</Text>
-
-                        <Text style={styles.label}>Hora de Finalización:</Text>
-                        <Text style={{ marginBottom: 10, color: '#27ae60', fontWeight: 'bold' }}>{formatearFechaHora(ticket.fecha_finalizacion)}</Text>
-
-                        <Text style={styles.label}>1. Tiempo total desde Asignación:</Text>
-                        <Text style={{ marginBottom: 10, color: '#2980b9', fontWeight: 'bold' }}>{tiempoDesdeAsignacion}</Text>
-
-                        <Text style={styles.label}>2. Tiempo efectivo de trabajo:</Text>
-                        <Text style={{ marginBottom: 10, color: '#8e44ad', fontWeight: 'bold' }}>{tiempoEnProceso}</Text>
-
-                        <Text style={styles.label}>Diagnóstico / Solución:</Text>
-                        <Text style={{ marginBottom: 10, color: '#333' }}>{ticket.diagnostico || 'Sin detalles registrados'}</Text>
-                    </View>
-
-                    <TouchableOpacity
-                        style={[styles.button, { backgroundColor: '#27ae60', marginTop: 10, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
-                        onPress={async () => {
-                            let ruta = rutaActaGuardada || ticket.url_acta || null;
-                            if (!ruta && idReal) {
-                                const acta = await obtenerActaSolicitud(idReal);
-                                if (acta?.ruta_url) {
-                                    ruta = acta.ruta_url;
-                                    setRutaActaGuardada(acta.ruta_url);
-                                    setNombreActaGuardada(acta.nombre_archivo || '');
-                                    setTipoMimeActaGuardada(acta.tipo_mime || '');
-                                }
-                            }
-                            const urlCompleta = construirUrlArchivo(ruta);
-                            if (!urlCompleta) {
-                                Alert.alert('Sin archivo adjunto', 'No se encontró un archivo de acta registrado para este soporte.');
-                                return;
-                            }
-                            const esPdf = (tipoMimeActaGuardada && tipoMimeActaGuardada.toLowerCase().includes('pdf')) ||
-                                urlCompleta.toLowerCase().endsWith('.pdf');
-                            if (esPdf) {
-                                Linking.openURL(urlCompleta);
-                            } else {
-                                setModalVerActaVisible(true);
-                            }
-                        }}
-                    >
-                        <AppIcon name="document" size={17} color="#ffffff" />
-                        <Text style={styles.buttonText}>Ver Acta Adjunta</Text>
-                    </TouchableOpacity>
-                </View>
-            )}
-
-            {/* 3. Vista de TÉCNICO */}
-            {rolUsuario === RolBandeja.TECNICO && estadoActual !== 'FINALIZADA' && (
-                <View style={styles.actionSection}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                        <AppIcon name="clock" size={18} color="#333" />
-                        <Text style={[styles.sectionTitle, { marginBottom: 0, marginLeft: 7 }]}>Tiempos del Soporte (En Vivo)</Text>
-                    </View>
-
-                    <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
-                        {/* CRONÓMETRO 1: Desde fecha_asignacion */}
-                        <View style={[styles.itemBox, { flex: 1, backgroundColor: '#eef7fc', borderColor: '#3498db', alignItems: 'center', marginBottom: 0 }]}>
-                            <Text style={{ fontSize: 12, color: '#2980b9', textAlign: 'center', fontWeight: '600' }}>
-                                1. Desde Asignación
-                            </Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
-                                <AppIcon name="clock" size={16} color="#2980b9" />
-                                <Text style={{ fontSize: 17, fontWeight: 'bold', color: '#2980b9', marginLeft: 5 }}>
-                                    {tiempoDesdeAsignacion}
-                                </Text>
-                            </View>
-                            <Text style={{ fontSize: 10, color: '#666', marginTop: 2, textAlign: 'center' }}>
-                                (fecha_asignacion)
-                            </Text>
-                        </View>
-
-                        {/* CRONÓMETRO 2: Desde fecha_inicio */}
-                        <View style={[styles.itemBox, { flex: 1, backgroundColor: '#f5eef8', borderColor: '#8e44ad', alignItems: 'center', marginBottom: 0 }]}>
-                            <Text style={{ fontSize: 12, color: '#8e44ad', textAlign: 'center', fontWeight: '600' }}>
-                                2. En Proceso (Trabajo)
-                            </Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
-                                <AppIcon name="wrench" size={16} color="#8e44ad" />
-                                <Text style={{ fontSize: 17, fontWeight: 'bold', color: '#8e44ad', marginLeft: 5 }}>
-                                    {tiempoEnProceso}
-                                </Text>
-                            </View>
-                            <Text style={{ fontSize: 10, color: '#666', marginTop: 2, textAlign: 'center' }}>
-                                (fecha_inicio)
-                            </Text>
-                        </View>
-                    </View>
-
-                    {/* Botón para Poner EN PROCESO si aún está en ASIGNADA */}
-                    {estadoActual === 'ASIGNADA' ? (
-                        <View style={{ marginBottom: 18 }}>
-                            <Text style={{ color: '#555', marginBottom: 10, lineHeight: 20 }}>
-                                Presiona <Text style={{ fontWeight: 'bold' }}>Poner En Proceso</Text> para iniciar el 2do cronómetro (<Text style={{ fontWeight: 'bold' }}>fecha_inicio</Text>) y bloquear reasignaciones del operador:
-                            </Text>
-                            <TouchableOpacity
-                                style={[styles.button, { backgroundColor: '#8e44ad', flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
-                                onPress={handlePonerEnProceso}
-                                disabled={cargando}
-                            >
-                                {cargando ? (
-                                    <ActivityIndicator color="#FFF" />
-                                ) : (
-                                    <>
-                                        <AppIcon name="play" size={16} color="#ffffff" />
-                                        <Text style={styles.buttonText}>Poner En Proceso (Iniciar Soporte)</Text>
-                                    </>
-                                )}
-                            </TouchableOpacity>
-                        </View>
-                    ) : (
-                        <View style={[styles.itemBox, { borderLeftWidth: 4, borderLeftColor: '#8e44ad', marginBottom: 18 }]}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                <AppIcon name="wrench" size={16} color="#8e44ad" />
-                                <Text style={{ fontWeight: 'bold', color: '#8e44ad', marginLeft: 6 }}>Soporte actualmente En Proceso</Text>
-                            </View>
-                            <Text style={{ color: '#555', fontSize: 13, marginTop: 4 }}>
-                                Ambos cronómetros están corriendo y solo se detendrán cuando subas el acta y finalices el soporte.
-                            </Text>
-                        </View>
-                    )}
-
-                    {/* SECCIÓN PARA FINALIZAR SOPORTE Y SUBIR ACTA */}
-                    <View style={{ borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 16, marginTop: 4 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                            <AppIcon name="check" size={18} color="#27ae60" />
-                            <Text style={[styles.sectionTitle, { marginBottom: 0, marginLeft: 7 }]}>Finalizar Soporte y Subir Acta</Text>
-                        </View>
-
-                        <Text style={styles.label}>1. Acta de Soporte (Imagen / Foto) *</Text>
-                        <TouchableOpacity
-                            style={[
-                                styles.addMoreButton,
-                                { marginTop: 4, marginBottom: 12, borderStyle: 'dashed', backgroundColor: archivoActaUri ? '#eafaf1' : '#f9f9f9', borderColor: archivoActaUri ? '#27ae60' : theme.colors.primary, flexDirection: 'row', justifyContent: 'center', gap: 8 }
-                            ]}
-                            onPress={handleSeleccionarActa}
-                        >
-                            <AppIcon name={archivoActaUri ? 'check' : 'camera'} size={17} color={archivoActaUri ? '#27ae60' : theme.colors.primary} />
-                            <Text style={{ color: archivoActaUri ? '#27ae60' : theme.colors.primary, fontWeight: 'bold' }}>
-                                {archivoActaUri ? `Acta seleccionada: ${nombreArchivoActa}` : 'Seleccionar Foto / Imagen del Acta'}
-                            </Text>
-                        </TouchableOpacity>
-
-                        <Text style={styles.label}>2. Diagnóstico / Observación *</Text>
-                        <TextInput
-                            style={styles.input}
-                            placeholder="Describe obligatoriamente qué trabajo o diagnóstico se realizó..."
-                            value={diagnostico}
-                            onChangeText={setDiagnostico}
-                            multiline
-                        />
-
-                        <TouchableOpacity
-                            style={[
-                                styles.button,
-                                {
-                                    backgroundColor: '#27ae60',
-                                    opacity: archivoActaUri && diagnostico.trim() ? 1 : 0.5,
-                                    flexDirection: 'row',
-                                    justifyContent: 'center',
-                                    gap: 8,
-                                }
-                            ]}
-                            onPress={handleFinalizar}
-                            disabled={cargando || !archivoActaUri || !diagnostico.trim()}
-                        >
-                            {cargando ? (
-                                <ActivityIndicator color="#FFF" />
-                            ) : (
-                                <>
-                                    <AppIcon name="check" size={18} color="#ffffff" />
-                                    <Text style={styles.buttonText}>Subir Acta y Finalizar Soporte</Text>
-                                </>
-                            )}
-                        </TouchableOpacity>
-                    </View>
-
-                    {/* BOTÓN PARA DERIVAR A OTRO TÉCNICO */}
-                    <View style={{ borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 16, marginTop: 20 }}>
-                        <TouchableOpacity
-                            style={[styles.addMoreButton, { borderColor: '#e67e22', marginTop: 0, flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
-                            onPress={() => setModalReasignarVisible(true)}
-                        >
-                            <AppIcon name="refresh" size={16} color="#e67e22" />
-                            <Text style={[styles.addMoreButtonText, { color: '#e67e22' }]}>
-                                Derivar soporte a otro Técnico
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            )}
-
-            {/* MODAL EMERGENTE DEL TÉCNICO PARA DERIVAR / REASIGNAR SOPORTE */}
-            <Modal
-                animationType="slide"
-                transparent={true}
-                visible={modalReasignarVisible}
-                onRequestClose={() => setModalReasignarVisible(false)}
+            {/* 2. CUERPO CON SCROLL NATURAL Y EVITACIÓN DE TECLADO */}
+            <KeyboardAvoidingView
+                style={styles.keyboardAvoiding}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={0}
             >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <Text style={styles.modalTitle}>Derivar Soporte a otro Técnico</Text>
+                <ScrollView
+                    ref={scrollViewRef}
+                    style={styles.scrollView}
+                    contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 }]}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
+                    showsVerticalScrollIndicator={false}
+                >
+                    <View style={[styles.innerContainer, { maxWidth: 760 }]}>
+                        {/* BANNER INSTITUCIONAL DEL TICKET */}
+                        <View style={styles.sectionBannerRow}>
+                            <View style={styles.blueCircleIcon}>
+                                <AppIcon name="clipboard" size={22} color="#ffffff" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.sectionBannerTitle}>
+                                    Ticket #{idReal}
+                                </Text>
+                                <Text style={styles.sectionBannerSub}>
+                                    Información y seguimiento de la solicitud
+                                </Text>
+                            </View>
+                        </View>
 
-                        <Text style={styles.label}>1. Selecciona al Técnico al que derivarás *</Text>
-                        {tecnicos.length === 0 ? (
-                            <ActivityIndicator color={theme.colors.primary} style={{ marginVertical: 12 }} />
-                        ) : (
-                            <View style={{ maxHeight: 180, marginBottom: 12 }}>
-                                <ScrollView>
-                                    {tecnicos.map((tec) => {
-                                        const esMismoTecnico = ticket.nombre_tecnico && tec.nombre === ticket.nombre_tecnico;
+                        {/* TARJETA 1: RESUMEN DEL TICKET */}
+                        <View style={styles.card}>
+                            {/* Bloque superior: Estado actual + Prioridad + Solicitante */}
+                            <View style={styles.summaryBlock1}>
+                                <View style={styles.summaryRow}>
+                                    <View>
+                                        <Text style={styles.summaryMiniLabel}>ESTADO ACTUAL</Text>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                                            <View style={[styles.statusBadge, { backgroundColor: estiloEstado.bg, borderColor: estiloEstado.border }]}>
+                                                <Text style={[styles.statusBadgeText, { color: estiloEstado.color }]}>
+                                                    {estiloEstado.texto}
+                                                </Text>
+                                            </View>
+                                            {infoPrioridad && (
+                                                <View style={[styles.priorityBadge, { backgroundColor: infoPrioridad.bg, borderColor: infoPrioridad.color }]}>
+                                                    <View style={[styles.priorityDot, { backgroundColor: infoPrioridad.dot }]} />
+                                                    <Text style={[styles.priorityBadgeText, { color: infoPrioridad.color }]}>
+                                                        {infoPrioridad.texto}
+                                                    </Text>
+                                                </View>
+                                            )}
+                                        </View>
+                                    </View>
+                                </View>
+
+                                <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingTop: 8 }}>
+                                    <Text style={styles.summaryMiniLabel}>SOLICITANTE</Text>
+                                    <Text style={styles.summaryValueName}>
+                                        {ticket.nombre_usuario || (ticket as any).username || 'Funcionario institucional'}
+                                    </Text>
+                                </View>
+                            </View>
+
+                            {/* Bloque: 2 Columnas de Fecha y Hora */}
+                            <View style={styles.summaryBlock2}>
+                                <View style={styles.summaryColCard}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                                        <AppIcon name="calendar" size={14} color="#164a96" />
+                                        <Text style={styles.summaryColLabel}>FECHA</Text>
+                                    </View>
+                                    <Text style={styles.summaryColValue}>{fechaSolicitud}</Text>
+                                </View>
+
+                                <View style={styles.summaryColCard}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                                        <AppIcon name="clock" size={14} color="#164a96" />
+                                        <Text style={styles.summaryColLabel}>
+                                            {rolUsuario === RolBandeja.TECNICO && estadoActual !== 'FINALIZADA' ? 'TIEMPO' : 'HORA'}
+                                        </Text>
+                                    </View>
+                                    <Text style={styles.summaryColValue}>
+                                        {rolUsuario === RolBandeja.TECNICO && estadoActual !== 'FINALIZADA'
+                                            ? tiempoDesdeAsignacion
+                                            : horaSolicitud}
+                                    </Text>
+                                </View>
+                            </View>
+
+                            {/* Ubicación */}
+                            <View style={styles.locationSection}>
+                                <View style={styles.sectionHeaderRow}>
+                                    <View style={styles.sectionIconPill}>
+                                        <AppIcon name="location" size={15} color="#164a96" />
+                                    </View>
+                                    <Text style={styles.sectionCardTitle}>Ubicación</Text>
+                                </View>
+                                <View style={styles.infoContentBox}>
+                                    <Text style={styles.locationTitle}>{ticket.oficina || 'Sin oficina'}</Text>
+                                    <Text style={styles.locationSub}>
+                                        {ticket.piso ? `Piso: ${ticket.piso}` : 'Piso no registrado'}
+                                        {(ticket as any).consultorio ? ` • Consultorio: ${(ticket as any).consultorio}` : ''}
+                                    </Text>
+                                </View>
+                            </View>
+                        </View>
+
+                        {/* TARJETA 2: PROBLEMAS REPORTADOS Y TÉCNICO */}
+                        <View style={styles.card}>
+                            <View style={styles.sectionHeaderRow}>
+                                <View style={styles.sectionIconPill}>
+                                    <AppIcon name="wrench" size={15} color="#164a96" />
+                                </View>
+                                <Text style={styles.sectionCardTitle}>Problemas Reportados</Text>
+                            </View>
+
+                            {cargandoItems ? (
+                                <ActivityIndicator size="small" color={theme.colors.primary} style={{ marginVertical: 14 }} />
+                            ) : itemsProblema.length > 0 ? (
+                                itemsProblema.map((item, index) => {
+                                    const infoTipo = obtenerInfoTipoSoporte(item.id_tipo_soporte);
+                                    return (
+                                        <View key={index} style={styles.itemBox}>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                                <AppIcon name={infoTipo.icono} size={15} color="#164a96" />
+                                                <Text style={styles.itemType}>{infoTipo.nombre}</Text>
+                                            </View>
+                                            <Text style={styles.itemDesc}>{item.descripcion}</Text>
+                                            {index === 0 && (item.adjuntos || []).map((adjunto: any) => {
+                                                const urlImagen = construirUrlArchivo(adjunto.ruta_url);
+                                                return urlImagen ? (
+                                                    <TouchableOpacity key={adjunto.id} onPress={() => Linking.openURL(urlImagen)} style={styles.problemAttachment}>
+                                                        <Image source={{ uri: urlImagen }} style={styles.problemAttachmentImage} resizeMode="cover" />
+                                                        <Text style={styles.problemAttachmentText}>Ver imagen adjunta</Text>
+                                                    </TouchableOpacity>
+                                                ) : null;
+                                            })}
+                                        </View>
+                                    );
+                                })
+                            ) : (
+                                <Text style={styles.emptyItemsText}>No se pudieron cargar los problemas.</Text>
+                            )}
+
+                            {/* TÉCNICO ASIGNADO */}
+                            {Boolean(ticket.nombre_tecnico) && (
+                                <View style={styles.techAssignedBox}>
+                                    <AppIcon name="user" size={16} color="#1d4ed8" />
+                                    <View style={{ flex: 1, marginLeft: 8 }}>
+                                        <Text style={styles.techAssignedLabel}>Técnico Asignado:</Text>
+                                        <Text style={styles.techAssignedName}>{ticket.nombre_tecnico}</Text>
+                                    </View>
+                                </View>
+                            )}
+
+                            {rolUsuario === RolBandeja.TECNICO && Number(ticket.cantidad_reasignaciones || 0) > 0 && (
+                                <TouchableOpacity
+                                    style={styles.viewTechnicianHistoryButton}
+                                    onPress={() => setModalHistorialTecnicosVisible(true)}
+                                    activeOpacity={0.8}
+                                >
+                                    <AppIcon name="users" size={15} color="#1d5bbf" />
+                                    <Text style={styles.viewTechnicianHistoryText}>Ver técnicos y tiempos anteriores</Text>
+                                </TouchableOpacity>
+                            )}
+
+                            {/* AVISO DE REASIGNACIÓN PREVIA */}
+                            {Boolean(ticket.ultima_reasignacion_motivo) && (
+                                <View style={styles.warningAlertBox}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <AppIcon name="refresh" size={13} color="#d35400" />
+                                        <Text style={styles.warningAlertTitle}>Ticket Reasignado / Derivado</Text>
+                                    </View>
+                                    <Text style={styles.warningAlertText}>
+                                        Motivo: {ticket.ultima_reasignacion_motivo}
+                                    </Text>
+                                </View>
+                            )}
+
+                            {/* AVISO DE INSISTENCIA */}
+                            {Number(ticket.cantidad_resolicitudes || 0) > 0 && estadoActual !== 'FINALIZADA' && (
+                                <View style={styles.dangerAlertBox}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <AppIcon name="alert" size={13} color="#c0392b" />
+                                        <Text style={styles.dangerAlertTitle}>
+                                            Insistencia ({ticket.cantidad_resolicitudes}): Atención demorada
+                                        </Text>
+                                    </View>
+                                    {ticket.ultima_resolicitud_motivo ? (
+                                        <Text style={styles.dangerAlertText}>
+                                            "{ticket.ultima_resolicitud_motivo}"
+                                        </Text>
+                                    ) : null}
+                                </View>
+                            )}
+                        </View>
+
+                        {/* TARJETA 3: ACCIONES SEGÚN ROL */}
+
+                        {/* --- ROL USUARIO --- */}
+                        {rolUsuario === RolBandeja.USUARIO && estadoActual !== 'FINALIZADA' && (
+                            <View style={styles.card}>
+                                <Text style={styles.actionSectionTitle}>¿Atención demorada?</Text>
+                                <TextInput
+                                    style={styles.textInputArea}
+                                    placeholder="Escribe el motivo de tu insistencia (opcional)..."
+                                    placeholderTextColor="#94a3b8"
+                                    value={observacion}
+                                    onChangeText={setObservacion}
+                                    multiline
+                                />
+
+                                <TouchableOpacity
+                                    style={[styles.primaryActionBtn, { backgroundColor: '#e67e22' }]}
+                                    onPress={handleResolicitar}
+                                    disabled={cargando}
+                                >
+                                    {cargando ? (
+                                        <ActivityIndicator color="#ffffff" />
+                                    ) : (
+                                        <>
+                                            <AppIcon name="bell" size={16} color="#ffffff" />
+                                            <Text style={styles.primaryActionBtnText}>Re-solicitar / Insistir</Text>
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={styles.secondaryActionBtn}
+                                    onPress={() => setModalVisible(true)}
+                                >
+                                    <Text style={styles.secondaryActionBtnText}>+ Añadir otro problema a esta solicitud</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
+
+                        {/* --- ROL OPERADOR: ASIGNACIÓN INICIAL --- */}
+                        {rolUsuario === RolBandeja.OPERADOR && estadoActual === 'PENDIENTE' && (
+                            <View style={styles.card}>
+                                <Text style={styles.actionSectionTitle}>Asignar a Técnico</Text>
+
+                                <Text style={styles.inputMiniLabel}>1. Nivel de prioridad:</Text>
+                                <View style={styles.priorityGrid}>
+                                    {NIVELES_PRIORIDAD.map((p) => {
+                                        const activo = prioridad === p.valor;
                                         return (
                                             <TouchableOpacity
-                                                key={tec.id}
-                                                disabled={Boolean(esMismoTecnico)}
+                                                key={p.valor}
                                                 style={[
-                                                    styles.itemBox,
-                                                    { flexDirection: 'row', alignItems: 'center' },
-                                                    esMismoTecnico && { opacity: 0.5, backgroundColor: '#eee' },
-                                                    idNuevoTecnico === tec.id && { borderColor: theme.colors.primary, backgroundColor: '#eef2f9' }
+                                                    styles.priorityOptionCard,
+                                                    { borderColor: activo ? p.color : '#e2e8f0', backgroundColor: activo ? p.bg : '#ffffff' },
                                                 ]}
-                                                onPress={() => setIdNuevoTecnico(tec.id)}
+                                                onPress={() => setPrioridad(p.valor)}
                                             >
-                                                <AppIcon name="user" size={16} color={idNuevoTecnico === tec.id ? theme.colors.primary : '#333'} />
-                                                <Text style={{ fontWeight: 'bold', color: idNuevoTecnico === tec.id ? theme.colors.primary : '#333', marginLeft: 8 }}>
-                                                    {tec.nombre} {esMismoTecnico ? '(Tú)' : ''}
+                                                <View style={[styles.priorityDot, { backgroundColor: p.dot }]} />
+                                                <Text style={[styles.priorityOptionText, { color: activo ? p.color : '#475569' }]}>
+                                                    {p.etiqueta}
                                                 </Text>
                                             </TouchableOpacity>
                                         );
                                     })}
-                                </ScrollView>
+                                </View>
+
+                                <Text style={styles.inputMiniLabel}>2. Selecciona al técnico disponible:</Text>
+                                {tecnicos.length === 0 ? (
+                                    <ActivityIndicator color={theme.colors.primary} style={{ marginVertical: 14 }} />
+                                ) : (
+                                    <View style={{ marginBottom: 12 }}>
+                                        {tecnicos.map((tec) => (
+                                            <TouchableOpacity
+                                                key={tec.id}
+                                                style={[
+                                                    styles.selectOptionRow,
+                                                    idTecnico === tec.id && styles.selectOptionRowActive,
+                                                ]}
+                                                onPress={() => setIdTecnico(tec.id)}
+                                            >
+                                                <AppIcon
+                                                    name="user"
+                                                    size={15}
+                                                    color={idTecnico === tec.id ? '#164a96' : '#64748b'}
+                                                />
+                                                <Text
+                                                    style={[
+                                                        styles.selectOptionText,
+                                                        idTecnico === tec.id && styles.selectOptionTextActive,
+                                                    ]}
+                                                >
+                                                    {tec.nombre}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                )}
+
+                                <TouchableOpacity
+                                    style={[
+                                        styles.primaryActionBtn,
+                                        { backgroundColor: '#164a96', opacity: idTecnico ? 1 : 0.5 },
+                                    ]}
+                                    onPress={handleAsignar}
+                                    disabled={cargando || !idTecnico}
+                                >
+                                    {cargando ? (
+                                        <ActivityIndicator color="#ffffff" />
+                                    ) : (
+                                        <>
+                                            <Text style={styles.primaryActionBtnText}>Asignar Ticket</Text>
+                                            <AppIcon name="arrow-right" size={16} color="#ffffff" />
+                                        </>
+                                    )}
+                                </TouchableOpacity>
                             </View>
                         )}
 
-                        <Text style={styles.label}>2. Justificación de la derivación *</Text>
-                        <TextInput
-                            style={[styles.input, { height: 90 }]}
-                            multiline
-                            placeholder="Explica por qué estás derivando este soporte a otro técnico..."
-                            value={motivoDerivacion}
-                            onChangeText={setMotivoDerivacion}
-                        />
+                        {/* --- ROL OPERADOR: REASIGNACIÓN --- */}
+                        {rolUsuario === RolBandeja.OPERADOR && estadoActual === 'ASIGNADA' && (
+                            <View style={styles.card}>
+                                <Text style={styles.actionSectionTitle}>Reasignar a otro Técnico</Text>
 
-                        <View style={styles.modalButtons}>
-                            <TouchableOpacity style={styles.modalBtnCancel} onPress={() => setModalReasignarVisible(false)}>
-                                <Text style={styles.modalBtnCancelText}>Cancelar</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.modalBtnSubmit, { backgroundColor: '#e67e22', opacity: idNuevoTecnico && motivoDerivacion.trim() ? 1 : 0.5 }]}
-                                onPress={handleDerivarTecnico}
-                                disabled={guardandoReasignacion || !idNuevoTecnico || !motivoDerivacion.trim()}
-                            >
-                                {guardandoReasignacion ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalBtnSubmitText}>Confirmar Derivación</Text>}
-                            </TouchableOpacity>
-                        </View>
+                                <Text style={styles.inputMiniLabel}>1. Motivo del cambio *</Text>
+                                <TextInput
+                                    style={styles.textInputArea}
+                                    placeholder="Explica por qué se cambia de técnico..."
+                                    placeholderTextColor="#94a3b8"
+                                    value={justificacionReasignacion}
+                                    onChangeText={setJustificacionReasignacion}
+                                    multiline
+                                />
+
+                                <Text style={styles.inputMiniLabel}>2. Nivel de prioridad:</Text>
+                                <View style={styles.priorityGrid}>
+                                    {NIVELES_PRIORIDAD.map((p) => {
+                                        const activo = prioridad === p.valor;
+                                        return (
+                                            <TouchableOpacity
+                                                key={p.valor}
+                                                style={[
+                                                    styles.priorityOptionCard,
+                                                    { borderColor: activo ? p.color : '#e2e8f0', backgroundColor: activo ? p.bg : '#ffffff' },
+                                                ]}
+                                                onPress={() => setPrioridad(p.valor)}
+                                            >
+                                                <View style={[styles.priorityDot, { backgroundColor: p.dot }]} />
+                                                <Text style={[styles.priorityOptionText, { color: activo ? p.color : '#475569' }]}>
+                                                    {p.etiqueta}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+
+                                <Text style={styles.inputMiniLabel}>3. Nuevo técnico disponible:</Text>
+                                <View style={{ marginBottom: 12 }}>
+                                    {tecnicos.map((tec) => {
+                                        const esActual = ticket.nombre_tecnico && tec.nombre === ticket.nombre_tecnico;
+                                        return (
+                                            <TouchableOpacity
+                                                key={tec.id}
+                                                disabled={Boolean(esActual)}
+                                                style={[
+                                                    styles.selectOptionRow,
+                                                    esActual && { opacity: 0.5, backgroundColor: '#f1f5f9' },
+                                                    idTecnico === tec.id && styles.selectOptionRowActive,
+                                                ]}
+                                                onPress={() => setIdTecnico(tec.id)}
+                                            >
+                                                <AppIcon
+                                                    name="user"
+                                                    size={15}
+                                                    color={idTecnico === tec.id ? '#164a96' : '#64748b'}
+                                                />
+                                                <Text
+                                                    style={[
+                                                        styles.selectOptionText,
+                                                        idTecnico === tec.id && styles.selectOptionTextActive,
+                                                    ]}
+                                                >
+                                                    {tec.nombre} {esActual ? '(Asignado)' : ''}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+
+                                <TouchableOpacity
+                                    style={[
+                                        styles.primaryActionBtn,
+                                        {
+                                            backgroundColor: '#e67e22',
+                                            opacity: idTecnico && justificacionReasignacion.trim() ? 1 : 0.5,
+                                        },
+                                    ]}
+                                    onPress={handleReasignarOperador}
+                                    disabled={cargando || !idTecnico || !justificacionReasignacion.trim()}
+                                >
+                                    {cargando ? (
+                                        <ActivityIndicator color="#ffffff" />
+                                    ) : (
+                                        <>
+                                            <AppIcon name="refresh" size={16} color="#ffffff" />
+                                            <Text style={styles.primaryActionBtnText}>Confirmar Reasignación</Text>
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        )}
+
+                        {/* --- ROL OPERADOR: BLOQUEO EN PROCESO --- */}
+                        {rolUsuario === RolBandeja.OPERADOR && estadoActual === 'EN_PROCESO' && (
+                            <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: '#8e44ad' }]}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                                    <AppIcon name="wrench" size={16} color="#8e44ad" />
+                                    <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#8e44ad', marginLeft: 6 }}>
+                                        Soporte En Proceso
+                                    </Text>
+                                </View>
+                                <Text style={{ color: '#475569', fontSize: 13, lineHeight: 18 }}>
+                                    Atendido actualmente por{' '}
+                                    <Text style={{ fontWeight: 'bold', color: '#8e44ad' }}>
+                                        {ticket.nombre_tecnico || 'el técnico'}
+                                    </Text>
+                                    . No se puede reasignar durante la atención.
+                                </Text>
+                            </View>
+                        )}
+
+                        {/* --- HISTORIAL / FINALIZADA (OPERADOR / TÉCNICO) --- */}
+                        {(rolUsuario === RolBandeja.OPERADOR || rolUsuario === RolBandeja.TECNICO) && estadoActual === 'FINALIZADA' && (
+                            <View style={styles.card}>
+                                <Text style={styles.actionSectionTitle}>Historial y Acta de Soporte</Text>
+
+                                <View style={styles.historyMetricsBox}>
+                                    <View style={styles.historyMetricRow}>
+                                        <Text style={styles.historyMetricLabel}>Técnico:</Text>
+                                        <Text style={styles.historyMetricValue}>{ticket.nombre_tecnico || 'Técnico'}</Text>
+                                    </View>
+                                    <View style={styles.historyMetricRow}>
+                                        <Text style={styles.historyMetricLabel}>Asignación:</Text>
+                                        <Text style={[styles.historyMetricValue, { color: '#1d4ed8' }]}>
+                                            {formatearFechaHora(ticket.fecha_asignacion)}
+                                        </Text>
+                                    </View>
+                                    <View style={styles.historyMetricRow}>
+                                        <Text style={styles.historyMetricLabel}>Finalización:</Text>
+                                        <Text style={[styles.historyMetricValue, { color: '#15803d' }]}>
+                                            {formatearFechaHora(ticket.fecha_finalizacion)}
+                                        </Text>
+                                    </View>
+                                    <View style={styles.historyMetricRow}>
+                                        <Text style={styles.historyMetricLabel}>Tiempo total:</Text>
+                                        <Text style={[styles.historyMetricValue, { color: '#1d4ed8' }]}>
+                                            {tiempoDesdeAsignacion}
+                                        </Text>
+                                    </View>
+                                    <View style={styles.historyMetricRow}>
+                                        <Text style={styles.historyMetricLabel}>Trabajo efectivo:</Text>
+                                        <Text style={[styles.historyMetricValue, { color: '#6d28d9' }]}>
+                                            {tiempoEnProceso}
+                                        </Text>
+                                    </View>
+                                    {Boolean(ticket.diagnostico) && (
+                                        <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingTop: 8 }}>
+                                            <Text style={styles.historyMetricLabel}>Diagnóstico:</Text>
+                                            <Text style={{ fontSize: 13, color: '#334155', marginTop: 2 }}>
+                                                {ticket.diagnostico}
+                                            </Text>
+                                        </View>
+                                    )}
+                                </View>
+
+                                <TouchableOpacity
+                                    style={[styles.primaryActionBtn, { backgroundColor: '#15803d', marginTop: 12 }]}
+                                    onPress={async () => {
+                                        let ruta = rutaActaGuardada || ticket.url_acta || null;
+                                        if (!ruta && idReal) {
+                                            const acta = await obtenerActaSolicitud(idReal);
+                                            if (acta?.ruta_url) {
+                                                ruta = acta.ruta_url;
+                                                setRutaActaGuardada(acta.ruta_url);
+                                                setNombreActaGuardada(acta.nombre_archivo || '');
+                                                setTipoMimeActaGuardada(acta.tipo_mime || '');
+                                            }
+                                        }
+                                        const urlCompleta = construirUrlArchivo(ruta);
+                                        if (!urlCompleta) {
+                                            Alert.alert('Sin archivo', 'No se encontró un archivo de acta adjunto.');
+                                            return;
+                                        }
+                                        const esPdf =
+                                            (tipoMimeActaGuardada && tipoMimeActaGuardada.toLowerCase().includes('pdf')) ||
+                                            urlCompleta.toLowerCase().endsWith('.pdf');
+                                        if (esPdf) {
+                                            Linking.openURL(urlCompleta);
+                                        } else {
+                                            setModalVerActaVisible(true);
+                                        }
+                                    }}
+                                >
+                                    <AppIcon name="document" size={16} color="#ffffff" />
+                                    <Text style={styles.primaryActionBtnText}>Ver Acta Adjunta</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
+
+                        {/* --- ROL TÉCNICO (SOPORTE ACTIVO) --- */}
+                        {rolUsuario === RolBandeja.TECNICO && estadoActual !== 'FINALIZADA' && (
+                            <View style={styles.card}>
+                                <Text style={styles.actionSectionTitle}>Cronómetros en Vivo</Text>
+
+                                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
+                                    <View style={styles.timerCard}>
+                                        <Text style={styles.timerCardLabel}>1. Desde Asignación</Text>
+                                        <Text style={[styles.timerCardNumber, { color: '#1d4ed8' }]}>
+                                            {tiempoDesdeAsignacion}
+                                        </Text>
+                                    </View>
+                                    <View style={styles.timerCard}>
+                                        <Text style={styles.timerCardLabel}>2. En Proceso</Text>
+                                        <Text style={[styles.timerCardNumber, { color: '#6d28d9' }]}>
+                                            {tiempoEnProceso}
+                                        </Text>
+                                    </View>
+                                </View>
+
+                                {estadoActual === 'ASIGNADA' && (
+                                    <TouchableOpacity
+                                        style={[styles.primaryActionBtn, { backgroundColor: '#6d28d9', marginBottom: 14 }]}
+                                        onPress={handlePonerEnProceso}
+                                        disabled={cargando}
+                                    >
+                                        {cargando ? (
+                                            <ActivityIndicator color="#ffffff" />
+                                        ) : (
+                                            <>
+                                                <AppIcon name="play" size={16} color="#ffffff" />
+                                                <Text style={styles.primaryActionBtnText}>Poner En Proceso (Iniciar)</Text>
+                                            </>
+                                        )}
+                                    </TouchableOpacity>
+                                )}
+
+                                {(estadoActual === 'ASIGNADA' || estadoActual === 'EN_PROCESO') && (
+                                    <TouchableOpacity
+                                        style={[styles.secondaryActionBtn, { borderColor: '#e67e22', marginBottom: 14 }]}
+                                        onPress={() => setModalReasignarVisible(true)}
+                                        disabled={cargando}
+                                    >
+                                        <AppIcon name="refresh" size={15} color="#e67e22" />
+                                        <Text style={[styles.secondaryActionBtnText, { color: '#e67e22' }]}>Derivar a otro Técnico</Text>
+                                    </TouchableOpacity>
+                                )}
+
+                                {/* FINALIZAR Y SUBIR ACTA: disponible después de iniciar */}
+                                {estadoActual === 'EN_PROCESO' && <View style={{ borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingTop: 14 }}>
+                                    <Text style={styles.actionSectionTitle}>Finalizar Soporte y Subir Acta</Text>
+
+                                    <Text style={styles.inputMiniLabel}>1. Foto del Acta *</Text>
+                                    <View style={styles.actaUploadActions}>
+                                        <TouchableOpacity
+                                            style={[styles.uploadActaBtn, styles.actaUploadAction, archivoActaUri && { backgroundColor: '#dcfce7', borderColor: '#15803d' }]}
+                                            onPress={() => handleSeleccionarActa(false)}
+                                        >
+                                            <AppIcon name={archivoActaUri ? 'check' : 'folder'} size={16} color={archivoActaUri ? '#15803d' : '#164a96'} />
+                                            <Text style={[styles.uploadActaBtnText, archivoActaUri && { color: '#15803d' }]} numberOfLines={1}>
+                                                {archivoActaUri ? nombreArchivoActa : 'Galería'}
+                                            </Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity style={[styles.uploadActaBtn, styles.actaUploadAction]} onPress={() => handleSeleccionarActa(true)}>
+                                            <AppIcon name="camera" size={16} color="#164a96" />
+                                            <Text style={styles.uploadActaBtnText}>Tomar foto</Text>
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <Text style={styles.inputMiniLabel}>2. Diagnóstico o Solución *</Text>
+                                    <TextInput
+                                        style={styles.textInputArea}
+                                        placeholder="Describe qué trabajo o solución técnica se realizó..."
+                                        placeholderTextColor="#94a3b8"
+                                        value={diagnostico}
+                                        onChangeText={setDiagnostico}
+                                        multiline
+                                        textAlignVertical="top"
+                                        onFocus={() => {
+                                            setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 250);
+                                        }}
+                                    />
+
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.primaryActionBtn,
+                                            {
+                                                backgroundColor: '#15803d',
+                                                opacity: archivoActaUri && diagnostico.trim() ? 1 : 0.5,
+                                            },
+                                        ]}
+                                        onPress={handleFinalizar}
+                                        disabled={cargando || !archivoActaUri || !diagnostico.trim()}
+                                    >
+                                        {cargando ? (
+                                            <ActivityIndicator color="#ffffff" />
+                                        ) : (
+                                            <>
+                                                <AppIcon name="check" size={16} color="#ffffff" />
+                                                <Text style={styles.primaryActionBtnText}>Subir Acta y Finalizar</Text>
+                                            </>
+                                        )}
+                                    </TouchableOpacity>
+                                </View>}
+                            </View>
+                        )}
                     </View>
-                </View>
-            </Modal>
 
-            {/* 4. EL MODAL EMERGENTE */}
+                    {/* 3. ONDAS INFERIORES DECORATIVAS (OCULTAS CUANDO EL TECLADO ESTÁ ABIERTO) */}
+                    {!tecladoVisible && (
+                        <View style={styles.bottomWavesWrapper} pointerEvents="none">
+                            <Image
+                                source={require('../../../../assets/ondas-inferiores.png')}
+                                style={styles.bottomWavesImg}
+                                resizeMode="stretch"
+                            />
+                        </View>
+                    )}
+                </ScrollView>
+            </KeyboardAvoidingView>
+
+            {/* MODAL INTERNO: AÑADIR PROBLEMA */}
             <Modal
                 animationType="slide"
                 transparent={true}
@@ -1075,44 +1161,197 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                     <View style={styles.modalContent}>
                         <Text style={styles.modalTitle}>Añadir otro problema</Text>
 
-                        <Text style={styles.label}>Tipo de Problema</Text>
+                        <Text style={styles.inputMiniLabel}>Tipo de Problema</Text>
                         <View style={styles.optionsRow}>
                             {TIPOS_SOPORTE.map((tipo) => (
                                 <TouchableOpacity
                                     key={tipo.id}
-                                    style={[styles.miniOption, nuevoTipoSoporte === tipo.id && styles.miniOptionActive]}
+                                    style={[
+                                        styles.miniOption,
+                                        nuevoTipoSoporte === tipo.id && styles.miniOptionActive,
+                                    ]}
                                     onPress={() => setNuevoTipoSoporte(tipo.id)}
                                 >
-                                    <View style={{ marginBottom: 6 }}>
-                                        <AppIcon name={tipo.icono} size={20} color={nuevoTipoSoporte === tipo.id ? theme.colors.primary : '#666'} />
-                                    </View>
-                                    <Text style={[styles.miniOptionText, nuevoTipoSoporte === tipo.id && styles.miniOptionTextActive]}>{tipo.titulo}</Text>
+                                    <AppIcon
+                                        name={tipo.icono}
+                                        size={18}
+                                        color={nuevoTipoSoporte === tipo.id ? '#164a96' : '#64748b'}
+                                    />
+                                    <Text
+                                        style={[
+                                            styles.miniOptionText,
+                                            nuevoTipoSoporte === tipo.id && styles.miniOptionTextActive,
+                                        ]}
+                                    >
+                                        {tipo.titulo}
+                                    </Text>
                                 </TouchableOpacity>
                             ))}
                         </View>
 
-                        <Text style={styles.label}>Descripción detallada</Text>
+                        <Text style={styles.inputMiniLabel}>Descripción</Text>
                         <TextInput
-                            style={[styles.input, { height: 100 }]}
+                            style={[styles.textInputArea, { height: 90 }]}
                             multiline
                             placeholder="Describe el nuevo problema..."
+                            placeholderTextColor="#94a3b8"
                             value={nuevaDescripcion}
                             onChangeText={setNuevaDescripcion}
                         />
 
                         <View style={styles.modalButtons}>
-                            <TouchableOpacity style={styles.modalBtnCancel} onPress={() => setModalVisible(false)}>
+                            <TouchableOpacity
+                                style={styles.modalBtnCancel}
+                                onPress={() => setModalVisible(false)}
+                            >
                                 <Text style={styles.modalBtnCancelText}>Cancelar</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={styles.modalBtnSubmit} onPress={handleAgregarItem} disabled={guardandoItem}>
-                                {guardandoItem ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalBtnSubmitText}>Guardar</Text>}
+                            <TouchableOpacity
+                                style={styles.modalBtnSubmit}
+                                onPress={handleAgregarItem}
+                                disabled={guardandoItem}
+                            >
+                                {guardandoItem ? (
+                                    <ActivityIndicator color="#fff" />
+                                ) : (
+                                    <Text style={styles.modalBtnSubmitText}>Guardar</Text>
+                                )}
                             </TouchableOpacity>
                         </View>
                     </View>
                 </View>
             </Modal>
 
-            {/* 5. MODAL PARA VISUALIZAR EL ARCHIVO DEL ACTA ADJUNTA */}
+            {/* MODAL INTERNO: DERIVAR TÉCNICO */}
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={modalReasignarVisible}
+                onRequestClose={() => setModalReasignarVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <Text style={styles.modalTitle}>Derivar Soporte a otro Técnico</Text>
+
+                        <Text style={styles.inputMiniLabel}>1. Selecciona al técnico *</Text>
+                        <View style={{ maxHeight: 160, marginBottom: 12 }}>
+                            <ScrollView>
+                                {tecnicos.map((tec) => {
+                                    const esMismo = ticket.nombre_tecnico && tec.nombre === ticket.nombre_tecnico;
+                                    return (
+                                        <TouchableOpacity
+                                            key={tec.id}
+                                            disabled={Boolean(esMismo)}
+                                            style={[
+                                                styles.selectOptionRow,
+                                                esMismo && { opacity: 0.5, backgroundColor: '#f1f5f9' },
+                                                idNuevoTecnico === tec.id && styles.selectOptionRowActive,
+                                            ]}
+                                            onPress={() => setIdNuevoTecnico(tec.id)}
+                                        >
+                                            <AppIcon
+                                                name="user"
+                                                size={15}
+                                                color={idNuevoTecnico === tec.id ? '#164a96' : '#64748b'}
+                                            />
+                                            <Text
+                                                style={[
+                                                    styles.selectOptionText,
+                                                    idNuevoTecnico === tec.id && styles.selectOptionTextActive,
+                                                ]}
+                                            >
+                                                {tec.nombre} {esMismo ? '(Tú)' : ''}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
+                        </View>
+
+                        <Text style={styles.inputMiniLabel}>2. Justificación *</Text>
+                        <TextInput
+                            style={[styles.textInputArea, { height: 80 }]}
+                            multiline
+                            placeholder="Explica el motivo de la derivación..."
+                            placeholderTextColor="#94a3b8"
+                            value={motivoDerivacion}
+                            onChangeText={setMotivoDerivacion}
+                        />
+
+                        <View style={styles.modalButtons}>
+                            <TouchableOpacity
+                                style={styles.modalBtnCancel}
+                                onPress={() => setModalReasignarVisible(false)}
+                            >
+                                <Text style={styles.modalBtnCancelText}>Cancelar</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[
+                                    styles.modalBtnSubmit,
+                                    {
+                                        backgroundColor: '#e67e22',
+                                        opacity: idNuevoTecnico && motivoDerivacion.trim() ? 1 : 0.5,
+                                    },
+                                ]}
+                                onPress={handleDerivarTecnico}
+                                disabled={guardandoReasignacion || !idNuevoTecnico || !motivoDerivacion.trim()}
+                            >
+                                {guardandoReasignacion ? (
+                                    <ActivityIndicator color="#fff" />
+                                ) : (
+                                    <Text style={styles.modalBtnSubmitText}>Confirmar</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* MODAL: HISTORIAL DE TÉCNICOS Y CRONÓMETROS */}
+            <Modal
+                animationType="slide"
+                transparent
+                visible={modalHistorialTecnicosVisible}
+                onRequestClose={() => setModalHistorialTecnicosVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <View style={styles.historyModalHeader}>
+                            <Text style={styles.modalTitle}>Técnicos involucrados</Text>
+                            <TouchableOpacity onPress={() => setModalHistorialTecnicosVisible(false)}>
+                                <AppIcon name="close" size={18} color="#64748b" />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView style={{ maxHeight: 440 }}>
+                            {historialTecnicos.map((etapa, index) => (
+                                <View key={etapa.id_asignacion || index} style={styles.technicianHistoryCard}>
+                                    <Text style={styles.technicianHistoryTitle}>Paso {index + 1} · {etapa.tipo_movimiento || 'MOVIMIENTO HISTÓRICO'}</Text>
+                                    <Text style={styles.technicianHistoryLine}>
+                                        Flujo: {etapa.nombre_actor || 'Actor no identificado'} ({etapa.rol_actor || 'ROL NO REGISTRADO'}) → {etapa.fecha_asignacion ? `${etapa.nombre_tecnico || 'Técnico'} (TÉCNICO)` : `${etapa.nombre_destino || 'Técnico receptor'} (TÉCNICO)`}
+                                    </Text>
+                                    <Text style={styles.technicianHistoryLine}>Asignado: {etapa.fecha_asignacion ? formatearFechaHora(etapa.fecha_asignacion) : 'No registrada en el historial anterior'}</Text>
+                                    <Text style={styles.technicianHistoryLine}>Tiempo asignado: {etapa.segundos_desde_asignacion === null ? 'No disponible en el registro anterior' : formatearSegundos(Number(etapa.segundos_desde_asignacion || 0))}</Text>
+                                    <Text style={styles.technicianHistoryLine}>Proceso: {etapa.fecha_inicio ? formatearFechaHora(etapa.fecha_inicio) : 'No iniciado'}</Text>
+                                    <Text style={styles.technicianHistoryLine}>Tiempo en proceso: {etapa.segundos_en_proceso === null ? (etapa.fecha_asignacion ? 'No iniciado' : 'No disponible en el registro anterior') : formatearSegundos(Number(etapa.segundos_en_proceso || 0))}</Text>
+                                    {etapa.fecha_derivacion && etapa.nombre_destino ? (
+                                        <Text style={styles.technicianHistoryLine}>
+                                            Siguiente paso: {etapa.nombre_tecnico || 'Técnico'} (TÉCNICO) → {etapa.nombre_destino} (TÉCNICO) · {etapa.rol_derivacion === 'OPERADOR' ? 'Reasignado por OPERADOR' : etapa.rol_derivacion === 'TECNICO' ? 'Derivado por TÉCNICO' : 'Rol de derivación no registrado'} · {formatearFechaHora(etapa.fecha_derivacion)}
+                                        </Text>
+                                    ) : null}
+                                    {etapa.motivo_derivacion ? (
+                                        <Text style={styles.technicianHistoryReason}>Motivo del siguiente paso: {etapa.motivo_derivacion}</Text>
+                                    ) : etapa.motivo_entrada ? (
+                                        <Text style={styles.technicianHistoryReason}>Motivo registrado: {etapa.motivo_entrada}</Text>
+                                    ) : null}
+                                </View>
+                            ))}
+                            {historialTecnicos.length === 0 && <Text style={styles.emptyItemsText}>No se encontró el historial de asignaciones.</Text>}
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* MODAL INTERNO: VER ACTA ADJUNTA */}
             <Modal
                 animationType="fade"
                 transparent={true}
@@ -1120,24 +1359,24 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                 onRequestClose={() => setModalVerActaVisible(false)}
             >
                 <View style={styles.modalOverlay}>
-                    <View style={[styles.modalContent, { maxWidth: 650, width: '100%', alignSelf: 'center' }]}>
-                        <Text style={styles.modalTitle}>📄 Acta de Soporte Adjunta</Text>
+                    <View style={[styles.modalContent, { maxWidth: 620 }]}>
+                        <Text style={styles.modalTitle}>Acta de Soporte Adjunta</Text>
                         {Boolean(nombreActaGuardada) && (
-                            <Text style={{ textAlign: 'center', color: '#666', fontSize: 13, marginBottom: 10 }}>
-                                Archivo: {nombreActaGuardada}
+                            <Text style={{ textAlign: 'center', color: '#64748b', fontSize: 12, marginBottom: 10 }}>
+                                {nombreActaGuardada}
                             </Text>
                         )}
 
                         {construirUrlArchivo(rutaActaGuardada || ticket.url_acta) ? (
-                            <View style={{ alignItems: 'center', marginBottom: 16 }}>
+                            <View style={{ alignItems: 'center', marginBottom: 14 }}>
                                 <Image
                                     source={{ uri: construirUrlArchivo(rutaActaGuardada || ticket.url_acta)! }}
-                                    style={{ width: '100%', height: 420, borderRadius: 8, backgroundColor: '#f2f4f8' }}
+                                    style={{ width: '100%', height: 400, borderRadius: 12, backgroundColor: '#f1f5f9' }}
                                     resizeMode="contain"
                                 />
                             </View>
                         ) : (
-                            <Text style={styles.emptyItemsText}>No se pudo cargar la vista previa del archivo.</Text>
+                            <Text style={styles.emptyItemsText}>No se pudo cargar la imagen del acta.</Text>
                         )}
 
                         <View style={styles.modalButtons}>
@@ -1148,11 +1387,13 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                     if (url) Linking.openURL(url);
                                 }}
                             >
-                                <Text style={{ color: theme.colors.primary, fontWeight: 'bold' }}>🔗 Abrir original / Descargar</Text>
+                                <Text style={{ color: '#164a96', fontWeight: 'bold', fontSize: 13 }}>
+                                    Abrir / Descargar
+                                </Text>
                             </TouchableOpacity>
 
                             <TouchableOpacity
-                                style={[styles.modalBtnSubmit, { backgroundColor: '#27ae60' }]}
+                                style={styles.modalBtnSubmit}
                                 onPress={() => setModalVerActaVisible(false)}
                             >
                                 <Text style={styles.modalBtnSubmitText}>Cerrar</Text>
@@ -1161,45 +1402,597 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                     </View>
                 </View>
             </Modal>
-        </ScrollView>
+        </View>
     );
 };
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: theme.colors.background, padding: theme.spacing.md },
-    cardHeader: { backgroundColor: '#ffffff', padding: theme.spacing.lg, borderRadius: 8, marginBottom: 16, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-    title: { fontSize: theme.typography.sizes.xl, fontWeight: 'bold', color: theme.colors.primary, marginBottom: 8 },
-    subtitle: { fontSize: theme.typography.sizes.md, color: theme.colors.textSecondary, marginBottom: 4 },
-    status: { fontSize: theme.typography.sizes.md, fontWeight: 'bold' },
+    screenWrapper: {
+        flex: 1,
+        backgroundColor: '#f4f7fb',
+    },
 
-    // ESTILOS PARA LOS ÍTEMS DEL PROBLEMA
-    itemsSection: { backgroundColor: '#ffffff', padding: 16, borderRadius: 8, marginBottom: 16, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-    itemBox: { backgroundColor: '#f9f9f9', padding: 12, borderRadius: 6, borderWidth: 1, borderColor: '#eee', marginBottom: 10 },
-    itemType: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 4 },
-    itemDesc: { fontSize: 14, color: '#666' },
-    emptyItemsText: { textAlign: 'center', color: '#999', marginTop: 10, fontStyle: 'italic' },
+    // CABECERA FIJA SUPERIOR
+    topHeader: {
+        backgroundColor: '#164a96',
+        paddingBottom: 0,
+        position: 'relative',
+    },
+    topBarRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingBottom: 8,
+        width: '100%',
+    },
+    backButton: {
+        width: 38,
+        height: 38,
+        borderRadius: 10,
+        backgroundColor: 'rgba(255, 255, 255, 0.16)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    navBarTitle: {
+        color: '#ffffff',
+        fontSize: 18,
+        fontWeight: 'bold',
+        textAlign: 'center',
+        flex: 1,
+        marginHorizontal: 12,
+    },
+    headerSpacerRight: {
+        width: 38,
+        height: 38,
+    },
+    headerBottomWave: {
+        width: '100%',
+        height: 24,
+        marginTop: 4,
+    },
 
-    actionSection: { backgroundColor: '#ffffff', padding: 16, borderRadius: 8, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, marginBottom: 20 },
-    sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 12 },
-    label: { fontSize: 14, color: '#333', marginBottom: 6, fontWeight: '500' },
-    input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 6, padding: 12, marginBottom: 16, minHeight: 80, textAlignVertical: 'top', backgroundColor: '#fdfdfd' },
-    button: { padding: 14, borderRadius: 6, alignItems: 'center' },
-    buttonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
-    addMoreButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: theme.colors.primary, padding: 14, borderRadius: 6, alignItems: 'center', marginTop: 12 },
-    addMoreButtonText: { color: theme.colors.primary, fontWeight: 'bold', fontSize: 14 },
+    // SCROLL Y CONTENEDOR
+    keyboardAvoiding: {
+        flex: 1,
+    },
+    scrollView: {
+        flex: 1,
+    },
+    scrollContent: {
+        paddingTop: 14,
+        paddingBottom: 40,
+    },
+    innerContainer: {
+        width: '100%',
+        alignSelf: 'center',
+        paddingHorizontal: 16,
+    },
 
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-    modalContent: { backgroundColor: '#fff', padding: 20, borderRadius: 10, elevation: 5, width: '100%', maxWidth: 520, alignSelf: 'center' },
-    modalTitle: { fontSize: 18, fontWeight: 'bold', color: theme.colors.primary, marginBottom: 16, textAlign: 'center' },
-    optionsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
-    miniOption: { flex: 1, alignItems: 'center', padding: 10, borderWidth: 1, borderColor: '#eee', borderRadius: 6, marginHorizontal: 4, backgroundColor: '#f9f9f9' },
-    miniOptionActive: { borderColor: theme.colors.primary, backgroundColor: '#eef2f9' },
-    miniOptionIcon: { fontSize: 20, marginBottom: 4 },
-    miniOptionText: { fontSize: 10, textAlign: 'center', color: '#666' },
-    miniOptionTextActive: { color: theme.colors.primary, fontWeight: 'bold' },
-    modalButtons: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 },
-    modalBtnCancel: { padding: 12, marginRight: 10 },
-    modalBtnCancelText: { color: '#666', fontWeight: 'bold' },
-    modalBtnSubmit: { backgroundColor: theme.colors.primary, padding: 12, borderRadius: 6, paddingHorizontal: 20 },
-    modalBtnSubmitText: { color: '#fff', fontWeight: 'bold' }
+    // BANNER INSTITUCIONAL
+    sectionBannerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 14,
+    },
+    blueCircleIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#1d68d8',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+        elevation: 2,
+    },
+    sectionBannerTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#0f294a',
+    },
+    sectionBannerSub: {
+        fontSize: 12.5,
+        color: '#475569',
+        marginTop: 1,
+    },
+
+    // TARJETAS
+    card: {
+        backgroundColor: '#ffffff',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 14,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+        elevation: 2,
+        shadowColor: '#0f172a',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+    },
+
+    // RESUMEN BLOQUE 1
+    summaryBlock1: {
+        backgroundColor: '#f8fafc',
+        borderRadius: 12,
+        padding: 12,
+        marginBottom: 10,
+    },
+    summaryRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    summaryMiniLabel: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#64748b',
+        letterSpacing: 0.5,
+    },
+    summaryValueName: {
+        fontSize: 15,
+        fontWeight: 'bold',
+        color: '#0f294a',
+        marginTop: 3,
+    },
+    statusBadge: {
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 8,
+        borderWidth: 1,
+    },
+    statusBadgeText: {
+        fontSize: 11.5,
+        fontWeight: 'bold',
+    },
+    priorityBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 6,
+        borderWidth: 1,
+    },
+    priorityDot: {
+        width: 7,
+        height: 7,
+        borderRadius: 4,
+        marginRight: 5,
+    },
+    priorityBadgeText: {
+        fontSize: 11,
+        fontWeight: 'bold',
+    },
+
+    // RESUMEN BLOQUE 2 (2 COLUMNAS)
+    summaryBlock2: {
+        flexDirection: 'row',
+        gap: 10,
+        marginBottom: 12,
+    },
+    summaryColCard: {
+        flex: 1,
+        backgroundColor: '#f8fafc',
+        borderRadius: 12,
+        padding: 12,
+    },
+    summaryColLabel: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#64748b',
+        letterSpacing: 0.3,
+    },
+    summaryColValue: {
+        fontSize: 14,
+        fontWeight: 'bold',
+        color: '#0f294a',
+        marginTop: 4,
+    },
+
+    // UBICACIÓN
+    locationSection: {
+        borderTopWidth: 1,
+        borderTopColor: '#e2e8f0',
+        paddingTop: 12,
+        marginTop: 2,
+    },
+    sectionHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 10,
+    },
+    sectionIconPill: {
+        width: 28,
+        height: 28,
+        borderRadius: 8,
+        backgroundColor: '#eef4ff',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 8,
+    },
+    sectionCardTitle: {
+        fontSize: 15,
+        fontWeight: 'bold',
+        color: '#0f294a',
+    },
+    infoContentBox: {
+        backgroundColor: '#f8fafc',
+        borderRadius: 10,
+        padding: 12,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+    },
+    locationTitle: {
+        fontSize: 14,
+        fontWeight: 'bold',
+        color: '#1e293b',
+    },
+    locationSub: {
+        fontSize: 12.5,
+        color: '#64748b',
+        marginTop: 2,
+    },
+
+    // ÍTEMS DEL PROBLEMA
+    itemBox: {
+        backgroundColor: '#f8fafc',
+        padding: 10,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+        marginBottom: 8,
+    },
+    itemType: {
+        fontSize: 13.5,
+        fontWeight: 'bold',
+        color: '#0f294a',
+        marginLeft: 6,
+    },
+    itemDesc: {
+        fontSize: 13,
+        color: '#475569',
+        marginTop: 2,
+        lineHeight: 18,
+    },
+    problemAttachment: { flexDirection: 'row', alignItems: 'center', marginTop: 8, alignSelf: 'flex-start' },
+    problemAttachmentImage: { width: 56, height: 56, borderRadius: 8, backgroundColor: '#e2e8f0' },
+    problemAttachmentText: { marginLeft: 9, color: '#1d5bbf', fontSize: 12, fontWeight: '600' },
+    emptyItemsText: {
+        textAlign: 'center',
+        color: '#94a3b8',
+        fontSize: 13,
+        paddingVertical: 10,
+        fontStyle: 'italic',
+    },
+
+    // FICHAS INFORMATIVAS
+    techAssignedBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#eff6ff',
+        borderRadius: 10,
+        padding: 10,
+        borderWidth: 1,
+        borderColor: '#bfdbfe',
+        marginTop: 6,
+    },
+    techAssignedLabel: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: '#1d4ed8',
+    },
+    techAssignedName: {
+        fontSize: 13.5,
+        fontWeight: 'bold',
+        color: '#1e3a8a',
+    },
+    viewTechnicianHistoryButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', marginTop: 8, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 8, backgroundColor: '#eef4ff' },
+    viewTechnicianHistoryText: { marginLeft: 6, color: '#1d5bbf', fontSize: 12, fontWeight: '600' },
+    historyModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+    technicianHistoryCard: { padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#f8fafc', marginBottom: 9 },
+    technicianHistoryTitle: { color: '#0f294a', fontSize: 14, fontWeight: '700', marginBottom: 6 },
+    technicianHistoryLine: { color: '#475569', fontSize: 12, marginTop: 3 },
+    technicianHistoryReason: { color: '#c2410c', fontSize: 12, fontWeight: '600', marginTop: 7 },
+    warningAlertBox: {
+        backgroundColor: '#fff8e1',
+        borderRadius: 8,
+        padding: 10,
+        borderLeftWidth: 4,
+        borderLeftColor: '#f39c12',
+        marginTop: 8,
+    },
+    warningAlertTitle: {
+        fontSize: 12.5,
+        fontWeight: 'bold',
+        color: '#d35400',
+        marginLeft: 5,
+    },
+    warningAlertText: {
+        fontSize: 12,
+        color: '#555',
+        marginTop: 2,
+    },
+    dangerAlertBox: {
+        backgroundColor: '#fdecea',
+        borderRadius: 8,
+        padding: 10,
+        borderLeftWidth: 4,
+        borderLeftColor: '#e74c3c',
+        marginTop: 8,
+    },
+    dangerAlertTitle: {
+        fontSize: 12.5,
+        fontWeight: 'bold',
+        color: '#c0392b',
+        marginLeft: 5,
+        flex: 1,
+    },
+    dangerAlertText: {
+        fontSize: 12,
+        color: '#922b21',
+        marginTop: 2,
+    },
+
+    // ACCIONES
+    actionSectionTitle: {
+        fontSize: 15,
+        fontWeight: 'bold',
+        color: '#0f294a',
+        marginBottom: 10,
+    },
+    inputMiniLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#475569',
+        marginBottom: 6,
+    },
+    textInputArea: {
+        borderWidth: 1,
+        borderColor: '#cbd5e1',
+        borderRadius: 10,
+        padding: 10,
+        fontSize: 13.5,
+        color: '#1e293b',
+        backgroundColor: '#ffffff',
+        minHeight: 70,
+        textAlignVertical: 'top',
+        marginBottom: 12,
+    },
+    primaryActionBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: '#164a96',
+        borderRadius: 10,
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+    },
+    primaryActionBtnText: {
+        color: '#ffffff',
+        fontWeight: 'bold',
+        fontSize: 14,
+    },
+    secondaryActionBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        borderWidth: 1,
+        borderColor: '#164a96',
+        borderRadius: 10,
+        paddingVertical: 10,
+        marginTop: 10,
+        backgroundColor: 'transparent',
+    },
+    secondaryActionBtnText: {
+        color: '#164a96',
+        fontWeight: 'bold',
+        fontSize: 13,
+    },
+
+    // GRILLA PRIORIDAD
+    priorityGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginBottom: 12,
+    },
+    priorityOptionCard: {
+        width: '48%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 8,
+        borderRadius: 8,
+        borderWidth: 1,
+    },
+    priorityOptionText: {
+        fontSize: 13,
+        fontWeight: 'bold',
+    },
+
+    // SELECTORES
+    selectOptionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 10,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+        backgroundColor: '#f8fafc',
+        marginBottom: 6,
+    },
+    selectOptionRowActive: {
+        borderColor: '#164a96',
+        backgroundColor: '#eff6ff',
+    },
+    selectOptionText: {
+        fontSize: 13,
+        color: '#334155',
+        marginLeft: 8,
+    },
+    selectOptionTextActive: {
+        color: '#164a96',
+        fontWeight: 'bold',
+    },
+
+    // CRONÓMETROS
+    timerCard: {
+        flex: 1,
+        backgroundColor: '#f8fafc',
+        borderRadius: 10,
+        padding: 10,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+        alignItems: 'center',
+    },
+    timerCardLabel: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: '#64748b',
+    },
+    timerCardNumber: {
+        fontSize: 15,
+        fontWeight: 'bold',
+        marginTop: 4,
+    },
+    uploadActaBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#cbd5e1',
+        borderStyle: 'dashed',
+        backgroundColor: '#f8fafc',
+        marginBottom: 12,
+    },
+    actaUploadActions: { flexDirection: 'row', gap: 8 },
+    actaUploadAction: { flex: 1, marginBottom: 12, minWidth: 0 },
+    uploadActaBtnText: {
+        fontSize: 13,
+        color: '#164a96',
+        fontWeight: '600',
+    },
+
+    // HISTORIAL METRICAS
+    historyMetricsBox: {
+        backgroundColor: '#f8fafc',
+        borderRadius: 10,
+        padding: 12,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+        gap: 6,
+    },
+    historyMetricRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    historyMetricLabel: {
+        fontSize: 12,
+        color: '#64748b',
+        fontWeight: '600',
+    },
+    historyMetricValue: {
+        fontSize: 13,
+        fontWeight: 'bold',
+        color: '#1e293b',
+    },
+
+    // ONDAS INFERIORES
+    bottomWavesWrapper: {
+        height: 44,
+        width: '100%',
+        overflow: 'hidden',
+        marginTop: 10,
+    },
+    bottomWavesImg: {
+        width: '100%',
+        height: 44,
+    },
+
+    // MODALES INTERNOS
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'center',
+        padding: 20,
+    },
+    modalContent: {
+        backgroundColor: '#ffffff',
+        borderRadius: 16,
+        padding: 20,
+        width: '100%',
+        maxWidth: 480,
+        alignSelf: 'center',
+        elevation: 6,
+    },
+    modalTitle: {
+        fontSize: 17,
+        fontWeight: 'bold',
+        color: '#0f294a',
+        marginBottom: 12,
+        textAlign: 'center',
+    },
+    optionsRow: {
+        flexDirection: 'row',
+        gap: 8,
+        marginBottom: 12,
+    },
+    miniOption: {
+        flex: 1,
+        alignItems: 'center',
+        paddingVertical: 10,
+        paddingHorizontal: 6,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+        backgroundColor: '#f8fafc',
+    },
+    miniOptionActive: {
+        borderColor: '#164a96',
+        backgroundColor: '#eff6ff',
+    },
+    miniOptionText: {
+        fontSize: 11,
+        color: '#64748b',
+        marginTop: 4,
+        textAlign: 'center',
+    },
+    miniOptionTextActive: {
+        color: '#164a96',
+        fontWeight: 'bold',
+    },
+    modalButtons: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        gap: 10,
+        marginTop: 8,
+    },
+    modalBtnCancel: {
+        paddingVertical: 8,
+        paddingHorizontal: 14,
+    },
+    modalBtnCancelText: {
+        color: '#64748b',
+        fontWeight: '600',
+        fontSize: 14,
+    },
+    modalBtnSubmit: {
+        backgroundColor: '#164a96',
+        borderRadius: 8,
+        paddingVertical: 9,
+        paddingHorizontal: 18,
+    },
+    modalBtnSubmitText: {
+        color: '#ffffff',
+        fontWeight: 'bold',
+        fontSize: 14,
+    },
 });

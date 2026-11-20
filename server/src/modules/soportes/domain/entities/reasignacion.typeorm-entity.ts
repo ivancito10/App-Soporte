@@ -17,6 +17,9 @@ export class SoporteReasignacionTypeOrmEntity {
   @Column({ type: 'text' })
   justificacion: string;
 
+  @Column({ name: 'rol_derivacion', type: 'varchar', length: 20, nullable: true })
+  rolDerivacion: string | null;
+
   @CreateDateColumn({ name: 'fecha' })
   fecha: Date;
 }

@@ -15,6 +15,7 @@ export type NombreIcono =
     | 'gear'
     | 'globe'
     | 'pin'
+    | 'location'
     | 'calendar'
     | 'clock'
     | 'play'
@@ -26,6 +27,7 @@ export type NombreIcono =
     | 'clipboard'
     | 'folder'
     | 'document'
+    | 'document-text'
     | 'camera'
     | 'trash'
     | 'lock'
@@ -137,6 +139,8 @@ export const AppIcon = ({ name, size = 18, color = '#164a96' }: AppIconProps) =>
                     </svg>
                 );
             case 'pin':
+        case 'location':
+            case 'location':
                 return (
                     <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
@@ -215,6 +219,8 @@ export const AppIcon = ({ name, size = 18, color = '#164a96' }: AppIconProps) =>
                     </svg>
                 );
             case 'document':
+        case 'document-text':
+            case 'document-text':
                 return (
                     <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -542,6 +548,7 @@ export const AppIcon = ({ name, size = 18, color = '#164a96' }: AppIconProps) =>
             );
 
         case 'pin':
+        case 'location':
             return (
                 <View style={box}>
                     <View
@@ -735,6 +742,7 @@ export const AppIcon = ({ name, size = 18, color = '#164a96' }: AppIconProps) =>
             );
 
         case 'document':
+        case 'document-text':
             return (
                 <View style={box}>
                     <View

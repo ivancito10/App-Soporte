@@ -19,7 +19,7 @@ export class ReasignarSoporteUseCase {
       throw new BadRequestException('No puedes reasignarte la tarea a ti mismo.');
     }
     
-    const resultado = await this.soporteRepo.reasignarSoporteTransaccional(idAsignacion, idDeSoporte, dto);
+    const resultado = await this.soporteRepo.reasignarSoporteTransaccional(idAsignacion, idDeSoporte, dto, 'TECNICO');
 
     return {
       exito: true,

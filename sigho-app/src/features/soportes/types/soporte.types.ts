@@ -19,23 +19,6 @@ export interface BandejaSoporteDto {
     estado?: string;
 }
 
-// Estructura del ticket que devuelve la base de datos (según tus consultas SQL)
-export interface TicketSoporte {
-    id?: number;
-    id_solicitud: number;
-    id_asignacion?: number; // Viene en la bandeja de técnico/administrador
-    fecha_solicitud?: string;
-    fecha_asignacion?: string;
-    piso: string;
-    oficina: string;
-    estado: string;
-    // Alertas (Operador)
-    cantidad_resolicitudes?: number;
-    ultima_resolicitud?: string;
-    // Métricas (Administrador)
-    minutos_atencion?: number;
-    cantidad_reasignaciones?: number;
-}
 // 1. Definimos cómo se ve un solo problema (ítem) reportado
 export interface CrearSolicitudItemPayload {
     id_tipo_soporte: number;
@@ -49,15 +32,31 @@ export interface CrearSolicitudPayload {
     consultorio?: string;
     items: CrearSolicitudItemPayload[];
 }
+
+// Estructura del ticket que devuelve la base de datos (según tus consultas SQL)
 export interface TicketSoporte {
     id?: number;
     id_solicitud: number;
-    id_asignacion?: number;
+    id_asignacion?: number; // Viene en la bandeja de técnico/administrador
+    fecha_solicitud?: string;
+    fecha_asignacion?: string;
     piso: string;
     oficina: string;
+    consultorio?: string;
     estado: string;
+    nombre_usuario?: string;
+    username?: string;
 
-    // NUEVAS PROPIEDADES PARA EL OPERADOR Y TÉCNICO
+    // Alertas (Operador)
+    cantidad_resolicitudes?: number;
+    ultima_resolicitud?: string;
+    ultima_resolicitud_motivo?: string;
+
+    // Métricas (Administrador)
+    minutos_atencion?: number;
+    cantidad_reasignaciones?: number;
+
+    // PROPIEDADES PARA EL OPERADOR Y TÉCNICO
     id_tecnico?: number;
     prioridad?: string;
     fecha_inicio?: string;
@@ -71,6 +70,4 @@ export interface TicketSoporte {
     tipo_mime_acta?: string;
     nombre_tecnico?: string;
     ultima_reasignacion_motivo?: string;
-    cantidad_resolicitudes?: number;
-    ultima_resolicitud_motivo?: string;
 }

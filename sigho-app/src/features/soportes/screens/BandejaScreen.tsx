@@ -554,7 +554,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#164a96',
         paddingTop: Platform.OS === 'web' ? 18 : 42,
         paddingBottom: 34,
-        paddingHorizontal: 16,
         position: 'relative',
         overflow: 'hidden',
     },
@@ -563,6 +562,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
+        paddingHorizontal: 16,
     },
     leftBarGroup: {
         flexDirection: 'row',
@@ -571,11 +571,11 @@ const styles = StyleSheet.create({
     },
     navBarTitle: {
         color: '#ffffff',
-        fontSize: 17,
+        fontSize: Platform.OS === 'web' ? 17 : 15,
         fontWeight: 'bold',
         textAlign: 'center',
         flex: 1,
-        marginHorizontal: 8,
+        marginHorizontal: 4,
     },
     rightBarGroup: {
         flexDirection: 'row',
@@ -609,11 +609,11 @@ const styles = StyleSheet.create({
     },
     headerBottomWave: {
         position: 'absolute',
-        bottom: -2,
+        bottom: 0,
         left: 0,
         right: 0,
         width: '100%',
-        height: 30,
+        height: 32,
     },
 
     // BANNER DE SECCIÓN Y TARJETAS KPI

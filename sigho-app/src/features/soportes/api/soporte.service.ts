@@ -80,6 +80,24 @@ export const crearNuevaSolicitud = async (payload: CrearSolicitudPayload) => {
     const response = await api.post('/soportes/solicitud', payload);
     return response.data;
 };
+
+export const subirAdjuntoSolicitud = async (idSolicitud: number, uri: string) => {
+    const formData = new FormData();
+    const nombre = uri.split('/').pop()?.split('?')[0] || 'imagen-problema.jpg';
+    const extension = nombre.split('.').pop()?.toLowerCase();
+    const tipoMime = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : extension === 'heic' || extension === 'heif' ? `image/${extension}` : 'image/jpeg';
+    if (Platform.OS === 'web') {
+        const response = await fetch(uri);
+        formData.append('archivo', await response.blob(), nombre);
+    } else {
+        // @ts-ignore Sintaxis de archivo de React Native
+        formData.append('archivo', { uri, name: nombre, type: tipoMime });
+    }
+    const response = await api.post(`/soportes/solicitud/${idSolicitud}/adjunto`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+};
 export const obtenerDetallesSolicitud = async (idSolicitud: number) => {
     try {
         const response = await api.get(`/soportes/solicitud/${idSolicitud}/items`);
@@ -89,6 +107,11 @@ export const obtenerDetallesSolicitud = async (idSolicitud: number) => {
         console.error('Error al obtener los detalles del ticket:', error);
         return [];
     }
+};
+
+export const obtenerHistorialTecnicos = async (idSolicitud: number) => {
+    const response = await api.get(`/soportes/solicitud/${idSolicitud}/historial-tecnicos`);
+    return response.data?.datos || [];
 };
 // Añade esto al final del archivo
 export const agregarItemSoporte = async (idSolicitud: number, payload: { id_tipo_soporte: number; descripcion: string }) => {
@@ -171,4 +194,33 @@ export const quitarRolUsuario = async (idUsuario: number, rolSoporte?: string) =
 export const obtenerMisRoles = async () => {
     const response = await api.get('/soportes/mis-roles');
     return response.data;
+};
+
+// 11. Sedes y Consultorios en cascada
+export const obtenerSedes = async () => {
+    const response = await api.get('/sedes?pagina=1&limite=100');
+    return response.data?.datos || [];
+};
+
+export const obtenerConsultoriosPorSede = async (idSede: number) => {
+    const response = await api.get(`/soportes/sedes/${idSede}/consultorios`);
+    return {
+        datos: response.data?.datos || [],
+        tiene_consultorios: !!response.data?.tiene_consultorios
+    };
+};
+
+export const obtenerTiposSoporteConOpciones = async () => {
+    const response = await api.get('/soportes/tipos-opciones');
+    return response.data?.datos || [];
+};
+
+export const crearOpcionTipoSoporte = async (idTipo: number, nombre: string) => {
+    const response = await api.post(`/soportes/tipos/${idTipo}/opciones`, { nombre });
+    return response.data?.datos;
+};
+
+export const cambiarEstadoOpcionTipoSoporte = async (idOpcion: number, estado: boolean) => {
+    const response = await api.patch(`/soportes/tipos/opciones/${idOpcion}/estado`, { estado });
+    return response.data?.datos;
 };

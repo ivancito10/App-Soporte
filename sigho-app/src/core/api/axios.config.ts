@@ -1,16 +1,18 @@
 import axios from 'axios';
-//import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import { obtenerItem } from '../utils/storage';
 
-// IMPORTANTE: Si usas Expo Go en tu celular físico, NO puedes usar 'localhost'.
-// Debes poner la IP de tu computadora en la red Wi-Fi (ej. 192.168.1.5).
-// En Windows, abre CMD, escribe 'ipconfig' y busca 'Dirección IPv4'.
-const API_URL = 'http://192.168.100.108:3000/api'; // Reemplaza la IP aquí
-//const API_URL = 'http://192.168.2.151:3000/api'; // Reemplaza la IP aquí
-//const API_URL = 'http://192.168.100.89:3000/api'; // Reemplaza la IP aquí
+const IP_LOCAL = '192.168.2.151';
+
+const obtenerBaseUrl = () => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.hostname) {
+        return `http://${window.location.hostname}:3000/api`;
+    }
+    return `http://${IP_LOCAL}:3000/api`;
+};
 
 export const api = axios.create({
-    baseURL: API_URL,
+    baseURL: obtenerBaseUrl(),
     headers: {
         'Content-Type': 'application/json',
     },

@@ -6,6 +6,7 @@ import {
     TouchableOpacity,
     TextInput,
     FlatList,
+    ScrollView,
     ActivityIndicator,
     Modal,
     Alert,
@@ -23,6 +24,9 @@ import {
     obtenerUsuariosConRoles,
     asignarRolUsuario,
     quitarRolUsuario,
+    obtenerTiposSoporteConOpciones,
+    crearOpcionTipoSoporte,
+    cambiarEstadoOpcionTipoSoporte,
 } from '../api/soporte.service';
 
 export interface UsuarioRolItem {
@@ -155,7 +159,41 @@ export const GestionRolesScreen = ({
     const [refrescando, setRefrescando] = useState<boolean>(false);
     const [guardandoAccion, setGuardandoAccion] = useState<boolean>(false);
     const [menuLateralVisible, setMenuLateralVisible] = useState<boolean>(false);
+    const [modalOpcionesVisible, setModalOpcionesVisible] = useState(false);
+    const [tiposConOpciones, setTiposConOpciones] = useState<Array<{ id: number; nombre: string; opciones: Array<{ id: number; nombre: string; estado?: boolean }> }>>([]);
+    const [nuevaOpcion, setNuevaOpcion] = useState('');
+    const [tipoOpcionSeleccionado, setTipoOpcionSeleccionado] = useState<number | null>(null);
     const tieneMultiplesRolesSesion = Array.isArray(rolesDisponibles) && rolesDisponibles.length > 1;
+
+    const cargarTiposConOpciones = async () => {
+        try {
+            const datos = await obtenerTiposSoporteConOpciones();
+            setTiposConOpciones(datos);
+            setTipoOpcionSeleccionado((actual) => actual ?? datos[0]?.id ?? null);
+        } catch (error) {
+            Alert.alert('Error', 'No se pudieron cargar las opciones de soporte.');
+        }
+    };
+
+    const guardarNuevaOpcion = async () => {
+        if (!tipoOpcionSeleccionado || !nuevaOpcion.trim()) return;
+        try {
+            await crearOpcionTipoSoporte(tipoOpcionSeleccionado, nuevaOpcion.trim());
+            setNuevaOpcion('');
+            await cargarTiposConOpciones();
+        } catch (error: any) {
+            Alert.alert('No se pudo guardar', error?.response?.data?.message || 'Verifica que la opción no exista ya en esta categoría.');
+        }
+    };
+
+    const alternarOpcion = async (id: number, estado: boolean) => {
+        try {
+            await cambiarEstadoOpcionTipoSoporte(id, estado);
+            await cargarTiposConOpciones();
+        } catch {
+            Alert.alert('Error', 'No se pudo actualizar el estado de la opción.');
+        }
+    };
 
     // Buscador y pestañas
     const [busqueda, setBusqueda] = useState<string>('');
@@ -527,6 +565,14 @@ export const GestionRolesScreen = ({
                         </TouchableOpacity>
                     )}
                 </View>
+                <TouchableOpacity
+                    style={styles.manageOptionsButton}
+                    onPress={() => { setModalOpcionesVisible(true); cargarTiposConOpciones(); }}
+                    activeOpacity={0.8}
+                >
+                    <AppIcon name="gear" size={16} color="#1d5bbf" />
+                    <Text style={styles.manageOptionsButtonText}>Configurar opciones de soporte</Text>
+                </TouchableOpacity>
             </View>
 
             {/* LISTADO */}
@@ -642,6 +688,39 @@ export const GestionRolesScreen = ({
                     </TouchableOpacity>
                 </View>
             </View>
+
+            <Modal transparent animationType="fade" visible={modalOpcionesVisible} onRequestClose={() => setModalOpcionesVisible(false)}>
+                <View style={styles.modalOverlay}>
+                    <View style={styles.optionsModalContent}>
+                        <View style={styles.modalHeaderRow}>
+                            <Text style={styles.modalTitle}>Opciones por categoría</Text>
+                            <TouchableOpacity onPress={() => setModalOpcionesVisible(false)}><Text style={{ fontSize: 18, color: '#666', fontWeight: 'bold' }}>✕</Text></TouchableOpacity>
+                        </View>
+                        <Text style={styles.modalSubtitle}>Agrega o activa las opciones que aparecerán al registrar solicitudes.</Text>
+                        <View style={styles.optionTypesWrap}>
+                            {tiposConOpciones.map((tipo) => (
+                                <TouchableOpacity key={tipo.id} style={[styles.optionTypePill, tipoOpcionSeleccionado === tipo.id && styles.optionTypePillActive]} onPress={() => setTipoOpcionSeleccionado(tipo.id)}>
+                                    <Text style={[styles.optionTypePillText, tipoOpcionSeleccionado === tipo.id && { color: '#fff' }]}>{tipo.nombre}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                        <View style={styles.addOptionRow}>
+                            <TextInput style={styles.addOptionInput} value={nuevaOpcion} onChangeText={setNuevaOpcion} placeholder="Ej.: Monitor, Teclado..." maxLength={120} />
+                            <TouchableOpacity style={styles.addOptionButton} onPress={guardarNuevaOpcion}><Text style={styles.addOptionButtonText}>Agregar</Text></TouchableOpacity>
+                        </View>
+                        <ScrollView style={{ maxHeight: 300 }} keyboardShouldPersistTaps="handled">
+                            {tiposConOpciones.find((tipo) => tipo.id === tipoOpcionSeleccionado)?.opciones.map((opcion) => (
+                                <View key={opcion.id} style={styles.optionAdminRow}>
+                                    <Text style={[styles.optionAdminName, opcion.estado === false && { color: '#94a3b8' }]}>{opcion.nombre}</Text>
+                                    <TouchableOpacity onPress={() => alternarOpcion(opcion.id, opcion.estado === false)}>
+                                        <Text style={styles.optionAdminAction}>{opcion.estado === false ? 'Activar' : 'Desactivar'}</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            ))}
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
 
             {/* MODAL PARA OTORGAR / CAMBIAR / QUITAR ROL */}
             <Modal
@@ -819,7 +898,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#164a96',
         paddingTop: Platform.OS === 'web' ? 18 : 42,
         paddingBottom: 34,
-        paddingHorizontal: 16,
         position: 'relative',
         overflow: 'hidden',
     },
@@ -828,6 +906,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
+        paddingHorizontal: 16,
     },
     leftBarGroup: {
         flexDirection: 'row',
@@ -836,11 +915,11 @@ const styles = StyleSheet.create({
     },
     navBarTitle: {
         color: '#ffffff',
-        fontSize: 17,
+        fontSize: Platform.OS === 'web' ? 17 : 15,
         fontWeight: 'bold',
         textAlign: 'center',
         flex: 1,
-        marginHorizontal: 8,
+        marginHorizontal: 4,
     },
     iconActionBtn: {
         width: 38,
@@ -852,11 +931,11 @@ const styles = StyleSheet.create({
     },
     headerBottomWave: {
         position: 'absolute',
-        bottom: -2,
+        bottom: 0,
         left: 0,
         right: 0,
         width: '100%',
-        height: 30,
+        height: 32,
     },
 
     // SECCIÓN DE RESUMEN Y BUSCADOR
@@ -933,6 +1012,30 @@ const styles = StyleSheet.create({
         borderColor: '#cbd5e1',
         height: 46,
     },
+    manageOptionsButton: {
+        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 10,
+        backgroundColor: '#eef4ff',
+    },
+    manageOptionsButtonText: { color: '#1d5bbf', fontSize: 13, fontWeight: '600', marginLeft: 7 },
+    optionsModalContent: { width: '100%', maxWidth: 520, maxHeight: '85%', backgroundColor: '#fff', borderRadius: 18, padding: 18 },
+    modalSubtitle: { fontSize: 13, color: '#64748b', marginBottom: 12 },
+    optionTypesWrap: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8, gap: 7 },
+    optionTypePill: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: '#f1f5f9' },
+    optionTypePillActive: { backgroundColor: '#1d5bbf' },
+    optionTypePillText: { color: '#334155', fontSize: 12, fontWeight: '600' },
+    addOptionRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+    addOptionInput: { flex: 1, height: 42, borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 10, paddingHorizontal: 12, color: '#1e293b' },
+    addOptionButton: { marginLeft: 8, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 10, backgroundColor: '#1d5bbf' },
+    addOptionButtonText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+    optionAdminRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
+    optionAdminName: { flex: 1, color: '#1e293b', fontSize: 14 },
+    optionAdminAction: { color: '#1d5bbf', fontWeight: '600', fontSize: 12, padding: 6 },
     searchIcon: { fontSize: 15, marginRight: 8 },
     searchInput: {
         flex: 1,
