@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import { theme } from '../../../core/theme/theme';
 import { AppIcon, NombreIcono } from '../../../core/components/AppIcon';
 import { RolBandeja, TicketSoporte } from '../types/soporte.types';
@@ -30,11 +31,16 @@ import {
     agregarItemSoporte,
     obtenerTecnicos,
     ponerEnProcesoSoporte,
+    registrarTecnicoEnCamino,
+    registrarLlegadaTecnico,
     reasignarSoporteOperador,
     obtenerActaSolicitud,
     construirUrlArchivo,
     obtenerBandeja,
     obtenerHistorialTecnicos,
+    obtenerCalificacionSoporte,
+    calificarTecnicoSoporte,
+    CalificacionTecnico,
 } from '../api/soporte.service';
 
 // Opciones de tipos de soporte para el modal de añadir problemas
@@ -47,9 +53,8 @@ const TIPOS_SOPORTE: Array<{ id: number; icono: NombreIcono; titulo: string }> =
 
 // Niveles de prioridad seleccionables
 const NIVELES_PRIORIDAD = [
-    { valor: 'URGENTE', etiqueta: 'Urgente', dot: '#e74c3c', color: '#c0392b', bg: '#fdecea' },
-    { valor: 'ALTA', etiqueta: 'Alta', dot: '#e67e22', color: '#d35400', bg: '#fef5e7' },
-    { valor: 'NORMAL', etiqueta: 'Normal', dot: '#2ecc71', color: '#27ae60', bg: '#eafaf1' },
+    { valor: 'ALTA', etiqueta: 'Alta', dot: '#e74c3c', color: '#c0392b', bg: '#fdecea' },
+    { valor: 'MEDIA', etiqueta: 'Media', dot: '#e67e22', color: '#d35400', bg: '#fef5e7' },
     { valor: 'BAJA', etiqueta: 'Baja', dot: '#3498db', color: '#2980b9', bg: '#ebf5fb' },
 ];
 
@@ -69,9 +74,8 @@ const obtenerEstiloEstado = (estado?: string) => {
 
 const obtenerInfoPrioridad = (prioridad?: string) => {
     const p = (prioridad || '').toUpperCase();
-    if (p === 'URGENTE') return { texto: 'URGENTE', dot: '#e74c3c', color: '#c0392b', bg: '#fdecea' };
-    if (p === 'ALTA') return { texto: 'ALTA', dot: '#e67e22', color: '#d35400', bg: '#fef5e7' };
-    if (p === 'NORMAL') return { texto: 'NORMAL', dot: '#2ecc71', color: '#27ae60', bg: '#eafaf1' };
+    if (p === 'URGENTE' || p === 'ALTA') return { texto: 'ALTA', dot: '#e74c3c', color: '#c0392b', bg: '#fdecea' };
+    if (p === 'NORMAL' || p === 'MEDIA') return { texto: 'MEDIA', dot: '#e67e22', color: '#d35400', bg: '#fef5e7' };
     if (p === 'BAJA') return { texto: 'BAJA', dot: '#3498db', color: '#2980b9', bg: '#ebf5fb' };
     return null;
 };
@@ -115,12 +119,17 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
     const scrollViewRef = useRef<React.ElementRef<typeof ScrollView>>(null);
     const [ticket, setTicket] = useState<TicketSoporte>(ticketInicial);
     const idReal = Number(ticket.id || ticket.id_solicitud);
+    const fechaSolicitudTicket = ticket.fecha_solicitud || (ticket as any).creado_en || (ticket as any).fecha_creacion || (ticket as any).createdAt;
 
     const [estadoActual, setEstadoActual] = useState<string>(ticket.estado);
 
     const [cargando, setCargando] = useState(false);
     const [cargandoItems, setCargandoItems] = useState(true);
     const [itemsProblema, setItemsProblema] = useState<any[]>([]);
+    const [calificacionGuardada, setCalificacionGuardada] = useState<any | null>(null);
+    const [calificacionSeleccionada, setCalificacionSeleccionada] = useState<CalificacionTecnico | null>(null);
+    const [cargandoCalificacion, setCargandoCalificacion] = useState(false);
+    const [guardandoCalificacion, setGuardandoCalificacion] = useState(false);
 
     const [observacion, setObservacion] = useState('');
     const [justificacionReasignacion, setJustificacionReasignacion] = useState('');
@@ -129,7 +138,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
     const [tecnicos, setTecnicos] = useState<any[]>([]);
     const [idTecnico, setIdTecnico] = useState<number | null>(null);
     const [prioridad, setPrioridad] = useState<string>(
-        ticketInicial.prioridad ? ticketInicial.prioridad.toUpperCase() : 'NORMAL'
+        ticketInicial.prioridad?.toUpperCase() === 'NORMAL' ? 'MEDIA' : ticketInicial.prioridad?.toUpperCase() === 'URGENTE' ? 'ALTA' : ticketInicial.prioridad?.toUpperCase() || 'MEDIA'
     );
 
     // Modal añadir otro problema
@@ -141,6 +150,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
     // Estados del Técnico (Cronómetros, Derivación, Acta)
     const [tiempoDesdeAsignacion, setTiempoDesdeAsignacion] = useState<string>('Calculando...');
     const [tiempoEnProceso, setTiempoEnProceso] = useState<string>('No iniciado');
+    const [tiempoEsperaAsignacion, setTiempoEsperaAsignacion] = useState<string>('Calculando...');
     const [baseSegundosInicio, setBaseSegundosInicio] = useState<number | null>(
         ticket.segundos_desde_inicio !== undefined && ticket.segundos_desde_inicio !== null
             ? Number(ticket.segundos_desde_inicio)
@@ -153,6 +163,8 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
     const [idNuevoTecnico, setIdNuevoTecnico] = useState<number | null>(null);
     const [motivoDerivacion, setMotivoDerivacion] = useState('');
     const [guardandoReasignacion, setGuardandoReasignacion] = useState(false);
+    const [registrandoTrayecto, setRegistrandoTrayecto] = useState(false);
+    const [ahoraTrayecto, setAhoraTrayecto] = useState(Date.now());
     const [archivoActaUri, setArchivoActaUri] = useState<string | null>(null);
     const [nombreArchivoActa, setNombreArchivoActa] = useState<string>('');
 
@@ -174,6 +186,12 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
         };
     }, []);
 
+    useEffect(() => {
+        if (!ticket.fecha_en_camino || ticket.fecha_llegada) return;
+        const intervalo = setInterval(() => setAhoraTrayecto(Date.now()), 1000);
+        return () => clearInterval(intervalo);
+    }, [ticket.fecha_en_camino, ticket.fecha_llegada]);
+
     // Carga de ítems y sincronización en tiempo real
     useEffect(() => {
         const cargarDatos = async () => {
@@ -181,7 +199,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                 const items = await obtenerDetallesSolicitud(idReal);
                 setItemsProblema(Array.isArray(items) ? items : []);
 
-                if (rolUsuario === RolBandeja.TECNICO && Number(ticket.cantidad_reasignaciones || 0) > 0) {
+                if (rolUsuario === RolBandeja.OPERADOR || rolUsuario === RolBandeja.TECNICO) {
                     try {
                         const historial = await obtenerHistorialTecnicos(idReal);
                         setHistorialTecnicos(Array.isArray(historial) ? historial : []);
@@ -245,17 +263,79 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
         return () => clearInterval(intervaloSync);
     }, [idReal, rolUsuario, estadoActual, baseSegundosInicio]);
 
+    useEffect(() => {
+        let activo = true;
+        if (rolUsuario !== RolBandeja.USUARIO || estadoActual !== 'FINALIZADA' || !idReal) return;
+        setCargandoCalificacion(true);
+        obtenerCalificacionSoporte(idReal)
+            .then((datos) => {
+                if (!activo) return;
+                setCalificacionGuardada(datos?.calificacion ? datos : null);
+                setCalificacionSeleccionada(datos?.calificacion || null);
+            })
+            .catch((error) => console.error('No se pudo cargar la calificación:', error))
+            .finally(() => { if (activo) setCargandoCalificacion(false); });
+        return () => { activo = false; };
+    }, [idReal, rolUsuario, estadoActual]);
+
+    const seleccionarCalificacion = async (calificacion: CalificacionTecnico) => {
+        if (calificacionGuardada || guardandoCalificacion) return;
+        setCalificacionSeleccionada(calificacion);
+        setGuardandoCalificacion(true);
+        try {
+            const guardada = await calificarTecnicoSoporte(idReal, calificacion);
+            setCalificacionGuardada(guardada || { calificacion });
+        } catch (error: any) {
+            setCalificacionSeleccionada(null);
+            Alert.alert('No se pudo calificar', error?.response?.data?.message || 'Intenta nuevamente más tarde.');
+        } finally {
+            setGuardandoCalificacion(false);
+        }
+    };
+
     // 2 Cronómetros en tiempo real
     useEffect(() => {
         const montoPantallaMs = Date.now();
-        const segAsignacionBase =
-            ticket.segundos_desde_asignacion !== undefined && ticket.segundos_desde_asignacion !== null
-                ? Number(ticket.segundos_desde_asignacion)
-                : ticket.fecha_asignacion
-                    ? Math.max(0, Math.floor((Date.now() - new Date(ticket.fecha_asignacion).getTime()) / 1000))
-                    : null;
+        const fechaSolicitudMs = fechaSolicitudTicket ? new Date(fechaSolicitudTicket).getTime() : NaN;
+        const fechaPrimeraAsignacionMs = ticket.fecha_primera_asignacion || ticket.fecha_asignacion
+            ? new Date(ticket.fecha_primera_asignacion || ticket.fecha_asignacion || '').getTime()
+            : NaN;
+        const segundosEsperaCerrada = ticket.segundos_hasta_asignacion !== undefined && ticket.segundos_hasta_asignacion !== null
+            ? Number(ticket.segundos_hasta_asignacion)
+            : Number.isFinite(fechaSolicitudMs) && Number.isFinite(fechaPrimeraAsignacionMs)
+                ? Math.max(0, Math.floor((fechaPrimeraAsignacionMs - fechaSolicitudMs) / 1000))
+                : null;
+        const fechaAsignacionMs = ticket.fecha_asignacion ? new Date(ticket.fecha_asignacion).getTime() : NaN;
+        const fechaInicioMs = ticket.fecha_inicio ? new Date(ticket.fecha_inicio).getTime() : NaN;
+        const segAsignacionServidor = ticket.segundos_desde_asignacion !== undefined && ticket.segundos_desde_asignacion !== null
+            ? Math.max(0, Number(ticket.segundos_desde_asignacion))
+            : null;
+        const fechaFinAsignacionMs = estadoActual === 'ASIGNADA'
+            ? Date.now()
+            : estadoActual === 'EN_PROCESO' && Number.isFinite(fechaInicioMs)
+                ? fechaInicioMs
+                : estadoActual === 'FINALIZADA' && ticket.fecha_finalizacion
+                    ? new Date(ticket.fecha_finalizacion).getTime()
+                    : NaN;
+        const segAsignacionPorFecha = Number.isFinite(fechaAsignacionMs) && Number.isFinite(fechaFinAsignacionMs)
+            ? Math.max(0, Math.floor((fechaFinAsignacionMs - fechaAsignacionMs) / 1000))
+            : null;
+        const segAsignacionBase = segAsignacionServidor !== null && segAsignacionPorFecha !== null
+            ? Math.max(segAsignacionServidor, segAsignacionPorFecha)
+            : segAsignacionServidor ?? segAsignacionPorFecha;
+
+        const actualizarEsperaAsignacion = (ahora: number) => {
+            if (segundosEsperaCerrada !== null) {
+                setTiempoEsperaAsignacion(formatearSegundos(segundosEsperaCerrada));
+            } else if (estadoActual === 'PENDIENTE' && Number.isFinite(fechaSolicitudMs)) {
+                setTiempoEsperaAsignacion(formatearSegundos((ahora - fechaSolicitudMs) / 1000));
+            } else {
+                setTiempoEsperaAsignacion('No disponible');
+            }
+        };
 
         if (estadoActual === 'FINALIZADA') {
+            actualizarEsperaAsignacion(Date.now());
             if (segAsignacionBase !== null) {
                 setTiempoDesdeAsignacion(formatearSegundos(segAsignacionBase));
             } else if (ticket.tiempo_resolucion) {
@@ -270,19 +350,22 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
         const actualizarRelojes = () => {
             const ahora = Date.now();
             const deltaSegundos = Math.floor((ahora - montoPantallaMs) / 1000);
+            actualizarEsperaAsignacion(ahora);
 
             if (segAsignacionBase !== null) {
-                setTiempoDesdeAsignacion(formatearSegundos(segAsignacionBase + deltaSegundos));
+                setTiempoDesdeAsignacion(formatearSegundos(segAsignacionBase + (estadoActual === 'ASIGNADA' ? deltaSegundos : 0)));
             } else {
                 setTiempoDesdeAsignacion('Sin asignación');
             }
 
-            if (baseSegundosInicio !== null) {
+            if (baseSegundosInicio !== null && estadoActual === 'EN_PROCESO') {
                 const deltaInicio = Math.floor((ahora - timestampInicioLocal) / 1000);
                 setTiempoEnProceso(formatearSegundos(baseSegundosInicio + deltaInicio));
-            } else if (ticket.fecha_inicio) {
+            } else if (ticket.fecha_inicio && estadoActual === 'EN_PROCESO') {
                 const segs = Math.max(0, Math.floor((ahora - new Date(ticket.fecha_inicio).getTime()) / 1000));
                 setTiempoEnProceso(formatearSegundos(segs));
+            } else if (baseSegundosInicio !== null) {
+                setTiempoEnProceso(formatearSegundos(baseSegundosInicio));
             } else {
                 setTiempoEnProceso('Aún no iniciado');
             }
@@ -291,7 +374,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
         actualizarRelojes();
         const intervalo = setInterval(actualizarRelojes, 1000);
         return () => clearInterval(intervalo);
-    }, [ticket.fecha_asignacion, ticket.fecha_inicio, ticket.segundos_desde_asignacion, estadoActual, baseSegundosInicio, timestampInicioLocal]);
+    }, [fechaSolicitudTicket, ticket.fecha_primera_asignacion, ticket.segundos_hasta_asignacion, ticket.fecha_asignacion, ticket.fecha_inicio, ticket.fecha_finalizacion, ticket.segundos_desde_asignacion, estadoActual, baseSegundosInicio, timestampInicioLocal]);
 
     // Acciones
     const handleAgregarItem = async () => {
@@ -395,6 +478,60 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
         }
     };
 
+    const capturarUbicacionActual = async () => {
+        const permiso = await Location.requestForegroundPermissionsAsync();
+        if (permiso.status !== 'granted') {
+            throw new Error('Activa el permiso de ubicación para registrar el trayecto.');
+        }
+        const ubicacion = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        return {
+            latitud: ubicacion.coords.latitude,
+            longitud: ubicacion.coords.longitude,
+        };
+    };
+
+    const handleRegistrarEnCamino = async () => {
+        if (!ticket.id_asignacion) {
+            Alert.alert('Sin asignación', 'No se encontró la asignación activa de este técnico.');
+            return;
+        }
+        setRegistrandoTrayecto(true);
+        try {
+            const coordenadas = await capturarUbicacionActual();
+            const datos = await registrarTecnicoEnCamino(Number(ticket.id_asignacion), coordenadas.latitud, coordenadas.longitud);
+            setTicket((actual) => ({ ...actual, ...datos }));
+            Alert.alert('Trayecto iniciado', 'Se registró la hora y ubicación GPS de salida.');
+        } catch (error: any) {
+            Alert.alert('No se pudo registrar', error?.response?.data?.message || error?.message || 'No se pudo obtener la ubicación actual.');
+        } finally {
+            setRegistrandoTrayecto(false);
+        }
+    };
+
+    const handleRegistrarLlegada = async () => {
+        if (!ticket.id_asignacion) {
+            Alert.alert('Sin asignación', 'No se encontró la asignación activa de este técnico.');
+            return;
+        }
+        setRegistrandoTrayecto(true);
+        try {
+            const coordenadas = await capturarUbicacionActual();
+            const datos = await registrarLlegadaTecnico(Number(ticket.id_asignacion), coordenadas.latitud, coordenadas.longitud);
+            setTicket((actual) => ({ ...actual, ...datos }));
+            Alert.alert('Llegada registrada', 'Se guardó la hora y ubicación GPS de llegada.');
+        } catch (error: any) {
+            Alert.alert('No se pudo registrar', error?.response?.data?.message || error?.message || 'No se pudo obtener la ubicación actual.');
+        } finally {
+            setRegistrandoTrayecto(false);
+        }
+    };
+
+    const abrirMapa = (latitud?: number | null, longitud?: number | null) => {
+        if (latitud === null || longitud === null || latitud === undefined || longitud === undefined) return;
+        const url = `https://www.google.com/maps/search/?api=1&query=${latitud},${longitud}`;
+        Linking.openURL(url).catch(() => Alert.alert('No se pudo abrir el mapa', 'Verifica que el dispositivo tenga una aplicación de mapas disponible.'));
+    };
+
     const handleDerivarTecnico = async () => {
         if (!idNuevoTecnico) {
             Alert.alert('Atención', 'Debes seleccionar al técnico al que deseas derivar el soporte.');
@@ -485,7 +622,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
     };
 
     // Fechas formateadas
-    const fechaRaw = ticket.fecha_solicitud || (ticket as any).creado_en || (ticket as any).fecha_creacion;
+    const fechaRaw = fechaSolicitudTicket;
     const fechaObj = fechaRaw ? new Date(fechaRaw) : null;
     const fechaSolicitud = fechaObj && !isNaN(fechaObj.getTime())
         ? fechaObj.toLocaleDateString('es-BO', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -496,6 +633,27 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
 
     const estiloEstado = obtenerEstiloEstado(estadoActual);
     const infoPrioridad = obtenerInfoPrioridad(ticket.prioridad || prioridad);
+    const etiquetaTiempoEtapa = estadoActual === 'PENDIENTE'
+        ? 'ESPERA DE ASIGNACIÓN'
+        : estadoActual === 'ASIGNADA'
+            ? 'TIEMPO ASIGNADO'
+            : estadoActual === 'EN_PROCESO'
+                ? 'TIEMPO EN PROCESO'
+                : 'HORA';
+    const tiempoEtapaActual = estadoActual === 'PENDIENTE'
+        ? tiempoEsperaAsignacion
+        : estadoActual === 'ASIGNADA'
+            ? tiempoDesdeAsignacion
+            : estadoActual === 'EN_PROCESO'
+                ? tiempoEnProceso
+                : horaSolicitud;
+    const fechaCaminoMs = ticket.fecha_en_camino ? new Date(ticket.fecha_en_camino).getTime() : NaN;
+    const fechaLlegadaMs = ticket.fecha_llegada ? new Date(ticket.fecha_llegada).getTime() : NaN;
+    const tiempoTrayecto = Number.isFinite(fechaCaminoMs)
+        ? formatearSegundos(((Number.isFinite(fechaLlegadaMs) ? fechaLlegadaMs : ahoraTrayecto) - fechaCaminoMs) / 1000)
+        : null;
+    const puedeRegistrarTrayecto = rolUsuario === RolBandeja.TECNICO
+        && (estadoActual === 'ASIGNADA' || estadoActual === 'EN_PROCESO');
 
     return (
         <View style={styles.screenWrapper}>
@@ -583,7 +741,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                 <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingTop: 8 }}>
                                     <Text style={styles.summaryMiniLabel}>SOLICITANTE</Text>
                                     <Text style={styles.summaryValueName}>
-                                        {ticket.nombre_usuario || (ticket as any).username || 'Funcionario institucional'}
+                                        {ticket.solicitante_manual || ticket.nombre_usuario || (ticket as any).username || 'Funcionario institucional'}
                                     </Text>
                                 </View>
                             </View>
@@ -598,20 +756,23 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                     <Text style={styles.summaryColValue}>{fechaSolicitud}</Text>
                                 </View>
 
-                                <View style={styles.summaryColCard}>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                                        <AppIcon name="clock" size={14} color="#164a96" />
-                                        <Text style={styles.summaryColLabel}>
-                                            {rolUsuario === RolBandeja.TECNICO && estadoActual !== 'FINALIZADA' ? 'TIEMPO' : 'HORA'}
-                                        </Text>
+                                {rolUsuario !== RolBandeja.USUARIO && (
+                                    <View style={styles.summaryColCard}>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                                            <AppIcon name="clock" size={14} color="#164a96" />
+                                            <Text style={styles.summaryColLabel}>{etiquetaTiempoEtapa}</Text>
+                                        </View>
+                                        <Text style={styles.summaryColValue}>{tiempoEtapaActual}</Text>
                                     </View>
-                                    <Text style={styles.summaryColValue}>
-                                        {rolUsuario === RolBandeja.TECNICO && estadoActual !== 'FINALIZADA'
-                                            ? tiempoDesdeAsignacion
-                                            : horaSolicitud}
-                                    </Text>
-                                </View>
+                                )}
                             </View>
+
+                            {rolUsuario === RolBandeja.OPERADOR && estadoActual !== 'PENDIENTE' && Number(ticket.cantidad_reasignaciones || 0) === 0 && (ticket.segundos_hasta_asignacion !== undefined && ticket.segundos_hasta_asignacion !== null || Boolean(fechaSolicitudTicket && (ticket.fecha_primera_asignacion || ticket.fecha_asignacion))) && (
+                                <View style={styles.waitAssignmentSummary}>
+                                    <Text style={styles.summaryColLabel}>ESPERA HASTA LA ASIGNACIÓN</Text>
+                                    <Text style={styles.summaryColValue}>{tiempoEsperaAsignacion}</Text>
+                                </View>
+                            )}
 
                             {/* Ubicación */}
                             <View style={styles.locationSection}>
@@ -628,6 +789,69 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                         {(ticket as any).consultorio ? ` • Consultorio: ${(ticket as any).consultorio}` : ''}
                                     </Text>
                                 </View>
+                            </View>
+
+                            <View style={styles.travelStatusBox}>
+                                <View style={styles.sectionHeaderRow}>
+                                    <View style={[styles.sectionIconPill, { backgroundColor: '#ecfeff' }]}>
+                                        <AppIcon name="location" size={15} color="#0e7490" />
+                                    </View>
+                                    <Text style={styles.sectionCardTitle}>Trayecto del técnico</Text>
+                                </View>
+                                {!ticket.fecha_en_camino ? (
+                                    <Text style={styles.travelHelpText}>El técnico aún no ha marcado que está en camino.</Text>
+                                ) : (
+                                    <>
+                                        <View style={styles.travelStatusPill}>
+                                            <Text style={styles.travelStatusPillText}>
+                                                {ticket.fecha_llegada ? 'LLEGADA REGISTRADA' : 'EN CAMINO'}
+                                            </Text>
+                                        </View>
+                                        <View style={styles.travelInfoRow}>
+                                            <Text style={styles.travelInfoLabel}>Salió:</Text>
+                                            <Text style={styles.travelInfoValue}>{formatearFechaHora(ticket.fecha_en_camino)}</Text>
+                                        </View>
+                                        {ticket.latitud_en_camino !== null && ticket.latitud_en_camino !== undefined && ticket.longitud_en_camino !== null && ticket.longitud_en_camino !== undefined && Number.isFinite(Number(ticket.latitud_en_camino)) && Number.isFinite(Number(ticket.longitud_en_camino)) && (
+                                            <TouchableOpacity onPress={() => abrirMapa(ticket.latitud_en_camino, ticket.longitud_en_camino)} activeOpacity={0.75}>
+                                                <Text style={styles.travelMapLink}>
+                                                    Ver ubicación de salida · {Number(ticket.latitud_en_camino).toFixed(5)}, {Number(ticket.longitud_en_camino).toFixed(5)}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        )}
+                                        <View style={styles.travelInfoRow}>
+                                            <Text style={styles.travelInfoLabel}>{ticket.fecha_llegada ? 'Llegó:' : 'Tiempo en camino:'}</Text>
+                                            <Text style={styles.travelInfoValue}>{ticket.fecha_llegada ? formatearFechaHora(ticket.fecha_llegada) : tiempoTrayecto}</Text>
+                                        </View>
+                                        {ticket.fecha_llegada && ticket.latitud_llegada !== null && ticket.latitud_llegada !== undefined && ticket.longitud_llegada !== null && ticket.longitud_llegada !== undefined && Number.isFinite(Number(ticket.latitud_llegada)) && Number.isFinite(Number(ticket.longitud_llegada)) && (
+                                            <TouchableOpacity onPress={() => abrirMapa(ticket.latitud_llegada, ticket.longitud_llegada)} activeOpacity={0.75}>
+                                                <Text style={styles.travelMapLink}>
+                                                    Ver ubicación de llegada · {Number(ticket.latitud_llegada).toFixed(5)}, {Number(ticket.longitud_llegada).toFixed(5)}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        )}
+                                        {ticket.fecha_llegada && (
+                                            <View style={styles.travelInfoRow}>
+                                                <Text style={styles.travelInfoLabel}>Duración del trayecto:</Text>
+                                                <Text style={styles.travelInfoValue}>{tiempoTrayecto}</Text>
+                                            </View>
+                                        )}
+                                    </>
+                                )}
+                                {puedeRegistrarTrayecto && !ticket.fecha_llegada && (
+                                    <TouchableOpacity
+                                        style={[styles.primaryActionBtn, styles.travelActionButton, !ticket.fecha_en_camino && { backgroundColor: '#0e7490' }]}
+                                        onPress={ticket.fecha_en_camino ? handleRegistrarLlegada : handleRegistrarEnCamino}
+                                        disabled={registrandoTrayecto || cargando}
+                                        activeOpacity={0.82}
+                                    >
+                                        {registrandoTrayecto ? <ActivityIndicator color="#ffffff" /> : (
+                                            <>
+                                                <AppIcon name="location" size={16} color="#ffffff" />
+                                                <Text style={styles.primaryActionBtnText}>{ticket.fecha_en_camino ? 'Llegué a la sede' : 'En camino'}</Text>
+                                            </>
+                                        )}
+                                    </TouchableOpacity>
+                                )}
                             </View>
                         </View>
 
@@ -679,7 +903,21 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                 </View>
                             )}
 
-                            {rolUsuario === RolBandeja.TECNICO && Number(ticket.cantidad_reasignaciones || 0) > 0 && (
+                            {rolUsuario === RolBandeja.OPERADOR && estadoActual === 'FINALIZADA' && Boolean(ticket.calificacion_usuario) && (
+                                <View style={styles.operatorRatingBox}>
+                                    <Text style={styles.operatorRatingEmoji}>
+                                        {ticket.calificacion_usuario === 'MUY_BIEN' ? '😊' : ticket.calificacion_usuario === 'BIEN' ? '😐' : '🙁'}
+                                    </Text>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.operatorRatingTitle}>Calificación del usuario</Text>
+                                        <Text style={styles.operatorRatingValue}>
+                                            {ticket.calificacion_usuario === 'MUY_BIEN' ? 'Muy bien' : ticket.calificacion_usuario === 'BIEN' ? 'Bien' : 'Mal'}
+                                        </Text>
+                                    </View>
+                                </View>
+                            )}
+
+                            {(rolUsuario === RolBandeja.OPERADOR || rolUsuario === RolBandeja.TECNICO) && Number(ticket.cantidad_reasignaciones || 0) > 0 && historialTecnicos.length > 0 && (
                                 <TouchableOpacity
                                     style={styles.viewTechnicianHistoryButton}
                                     onPress={() => setModalHistorialTecnicosVisible(true)}
@@ -757,6 +995,59 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                 >
                                     <Text style={styles.secondaryActionBtnText}>+ Añadir otro problema a esta solicitud</Text>
                                 </TouchableOpacity>
+                            </View>
+                        )}
+
+                        {rolUsuario === RolBandeja.USUARIO && estadoActual === 'FINALIZADA' && (
+                            <View style={styles.card}>
+                                <Text style={styles.actionSectionTitle}>¿Cómo fue la atención?</Text>
+                                <Text style={styles.ratingSubtitle}>
+                                    Califica el soporte brindado por {ticket.nombre_tecnico || 'el técnico'}.
+                                </Text>
+                                {cargandoCalificacion ? (
+                                    <ActivityIndicator color="#1d5bbf" style={{ marginVertical: 18 }} />
+                                ) : calificacionGuardada ? (
+                                    <View style={styles.ratingThanks}>
+                                        <Text style={styles.ratingThanksEmoji}>
+                                            {calificacionGuardada.calificacion === 'MUY_BIEN' ? '😊' : calificacionGuardada.calificacion === 'BIEN' ? '😐' : '🙁'}
+                                        </Text>
+                                        <Text style={styles.ratingThanksText}>Gracias por tu opinión. Tu calificación quedó registrada y no se puede cambiar.</Text>
+                                    </View>
+                                ) : (
+                                    <>
+                                        <View style={styles.ratingOptions}>
+                                            {([
+                                                { value: 'MUY_BIEN', label: 'Muy bien', emoji: '😊' },
+                                                { value: 'BIEN', label: 'Bien', emoji: '😐' },
+                                                { value: 'MAL', label: 'Mal', emoji: '🙁' },
+                                            ] as const).map((opcion) => {
+                                                const seleccionada = calificacionSeleccionada === opcion.value;
+                                                return (
+                                                    <TouchableOpacity
+                                                        key={opcion.value}
+                                                        style={[styles.ratingOption, seleccionada && styles.ratingOptionSelected, guardandoCalificacion && { opacity: 0.7 }]}
+                                                        onPress={() => seleccionarCalificacion(opcion.value)}
+                                                        disabled={guardandoCalificacion}
+                                                        accessibilityRole="button"
+                                                        accessibilityLabel={`Calificar ${opcion.label}`}
+                                                        accessibilityState={{ selected: seleccionada }}
+                                                        activeOpacity={0.75}
+                                                    >
+                                                        <Text style={styles.ratingEmoji}>{opcion.emoji}</Text>
+                                                        <Text style={[styles.ratingLabel, seleccionada && styles.ratingLabelSelected]}>{opcion.label}</Text>
+                                                    </TouchableOpacity>
+                                                );
+                                            })}
+                                        </View>
+
+                                        {guardandoCalificacion && (
+                                            <View style={styles.ratingSaving}>
+                                                <ActivityIndicator color="#1d5bbf" />
+                                                <Text style={styles.ratingSavingText}>Guardando calificación...</Text>
+                                            </View>
+                                        )}
+                                    </>
+                                )}
                             </View>
                         )}
 
@@ -840,7 +1131,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                         )}
 
                         {/* --- ROL OPERADOR: REASIGNACIÓN --- */}
-                        {rolUsuario === RolBandeja.OPERADOR && estadoActual === 'ASIGNADA' && (
+                        {rolUsuario === RolBandeja.OPERADOR && (estadoActual === 'ASIGNADA' || estadoActual === 'EN_PROCESO') && (
                             <View style={styles.card}>
                                 <Text style={styles.actionSectionTitle}>Reasignar a otro Técnico</Text>
 
@@ -932,25 +1223,6 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                             </View>
                         )}
 
-                        {/* --- ROL OPERADOR: BLOQUEO EN PROCESO --- */}
-                        {rolUsuario === RolBandeja.OPERADOR && estadoActual === 'EN_PROCESO' && (
-                            <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: '#8e44ad' }]}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                                    <AppIcon name="wrench" size={16} color="#8e44ad" />
-                                    <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#8e44ad', marginLeft: 6 }}>
-                                        Soporte En Proceso
-                                    </Text>
-                                </View>
-                                <Text style={{ color: '#475569', fontSize: 13, lineHeight: 18 }}>
-                                    Atendido actualmente por{' '}
-                                    <Text style={{ fontWeight: 'bold', color: '#8e44ad' }}>
-                                        {ticket.nombre_tecnico || 'el técnico'}
-                                    </Text>
-                                    . No se puede reasignar durante la atención.
-                                </Text>
-                            </View>
-                        )}
-
                         {/* --- HISTORIAL / FINALIZADA (OPERADOR / TÉCNICO) --- */}
                         {(rolUsuario === RolBandeja.OPERADOR || rolUsuario === RolBandeja.TECNICO) && estadoActual === 'FINALIZADA' && (
                             <View style={styles.card}>
@@ -1030,7 +1302,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                         )}
 
                         {/* --- ROL TÉCNICO (SOPORTE ACTIVO) --- */}
-                        {rolUsuario === RolBandeja.TECNICO && estadoActual !== 'FINALIZADA' && (
+                        {rolUsuario === RolBandeja.TECNICO && (estadoActual === 'ASIGNADA' || estadoActual === 'EN_PROCESO') && (
                             <View style={styles.card}>
                                 <Text style={styles.actionSectionTitle}>Cronómetros en Vivo</Text>
 
@@ -1576,6 +1848,16 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         padding: 12,
     },
+    waitAssignmentSummary: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        backgroundColor: '#eff6ff',
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 9,
+        marginBottom: 12,
+    },
     summaryColLabel: {
         fontSize: 11,
         fontWeight: '700',
@@ -1632,6 +1914,62 @@ const styles = StyleSheet.create({
         color: '#64748b',
         marginTop: 2,
     },
+    travelStatusBox: {
+        marginTop: 12,
+        padding: 12,
+        backgroundColor: '#f0fdfa',
+        borderWidth: 1,
+        borderColor: '#a5f3fc',
+        borderRadius: 12,
+    },
+    travelStatusPill: {
+        alignSelf: 'flex-start',
+        paddingHorizontal: 9,
+        paddingVertical: 4,
+        backgroundColor: '#cffafe',
+        borderRadius: 20,
+        marginBottom: 8,
+    },
+    travelStatusPillText: {
+        color: '#0e7490',
+        fontSize: 10,
+        fontWeight: '800',
+        letterSpacing: 0.3,
+    },
+    travelHelpText: {
+        color: '#64748b',
+        fontSize: 12.5,
+    },
+    travelInfoRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        gap: 8,
+        marginTop: 4,
+    },
+    travelInfoLabel: {
+        color: '#475569',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    travelInfoValue: {
+        flex: 1,
+        color: '#0f294a',
+        fontSize: 12,
+        fontWeight: '700',
+        textAlign: 'right',
+    },
+    travelMapLink: {
+        color: '#0369a1',
+        fontSize: 11.5,
+        fontWeight: '600',
+        textDecorationLine: 'underline',
+        marginTop: 5,
+        marginBottom: 4,
+    },
+    travelActionButton: {
+        marginTop: 12,
+        marginBottom: 0,
+    },
 
     // ÍTEMS DEL PROBLEMA
     itemBox: {
@@ -1686,6 +2024,31 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         color: '#1e3a8a',
     },
+    operatorRatingBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#f0fdf4',
+        borderRadius: 10,
+        padding: 10,
+        borderWidth: 1,
+        borderColor: '#bbf7d0',
+        marginTop: 8,
+    },
+    operatorRatingEmoji: {
+        fontSize: 25,
+        marginRight: 10,
+    },
+    operatorRatingTitle: {
+        color: '#166534',
+        fontSize: 11,
+        fontWeight: '600',
+    },
+    operatorRatingValue: {
+        color: '#14532d',
+        fontSize: 14,
+        fontWeight: '700',
+        marginTop: 2,
+    },
     viewTechnicianHistoryButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', marginTop: 8, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 8, backgroundColor: '#eef4ff' },
     viewTechnicianHistoryText: { marginLeft: 6, color: '#1d5bbf', fontSize: 12, fontWeight: '600' },
     historyModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
@@ -1739,6 +2102,75 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         color: '#0f294a',
         marginBottom: 10,
+    },
+    ratingSubtitle: {
+        color: '#64748b',
+        fontSize: 13,
+        marginTop: -4,
+        marginBottom: 14,
+    },
+    ratingOptions: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    ratingOption: {
+        flex: 1,
+        minHeight: 92,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 10,
+        paddingHorizontal: 4,
+        backgroundColor: '#f8fafc',
+        borderWidth: 1,
+        borderColor: '#dbe5f1',
+        borderRadius: 12,
+    },
+    ratingOptionSelected: {
+        backgroundColor: '#eff6ff',
+        borderColor: '#1d5bbf',
+        borderWidth: 2,
+    },
+    ratingEmoji: {
+        fontSize: 32,
+        marginBottom: 5,
+    },
+    ratingLabel: {
+        color: '#334155',
+        fontSize: 12,
+        fontWeight: '700',
+        textAlign: 'center',
+    },
+    ratingLabelSelected: {
+        color: '#1d4ed8',
+    },
+    ratingSaving: {
+        alignItems: 'center',
+        flexDirection: 'row',
+        gap: 8,
+        justifyContent: 'center',
+        marginTop: 12,
+    },
+    ratingSavingText: {
+        color: '#475569',
+        fontSize: 12,
+    },
+    ratingThanks: {
+        alignItems: 'center',
+        backgroundColor: '#f0fdf4',
+        borderColor: '#bbf7d0',
+        borderRadius: 12,
+        borderWidth: 1,
+        padding: 14,
+    },
+    ratingThanksEmoji: {
+        fontSize: 34,
+        marginBottom: 5,
+    },
+    ratingThanksText: {
+        color: '#166534',
+        fontSize: 13,
+        fontWeight: '600',
+        textAlign: 'center',
     },
     inputMiniLabel: {
         fontSize: 12,

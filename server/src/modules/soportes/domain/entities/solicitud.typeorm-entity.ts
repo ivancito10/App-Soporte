@@ -20,6 +20,12 @@ export class SolicitudTypeOrmEntity {
     @Column({ default: 'PENDIENTE' })
     estado: string;
 
+    @Column({ name: 'es_manual', type: 'boolean', default: false })
+    esManual: boolean;
+
+    @Column({ name: 'solicitante_manual', type: 'varchar', length: 180, nullable: true })
+    solicitanteManual: string | null;
+
     @CreateDateColumn({ name: 'created_at' })
     createdAt: Date;
 

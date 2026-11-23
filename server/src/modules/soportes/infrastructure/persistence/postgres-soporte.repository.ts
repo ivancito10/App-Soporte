@@ -1,8 +1,9 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { SoporteRepositoryPort } from '../../domain/ports/soporte.repository.port';
 import { CreateSolicitudDto } from '../../application/dtos/create-solicitud.dto';
+import { CreateSoporteManualDto } from '../../application/dtos/create-soporte-manual.dto';
 import { DB_CONNECTIONS } from '../../../../config/database.constants';
 import { SolicitudTypeOrmEntity } from '../../domain/entities/solicitud.typeorm-entity';
 import { SolicitudItemTypeOrmEntity } from '../../domain/entities/solicitud-item.typeorm-entity';
@@ -13,16 +14,42 @@ import { SoporteReasignacionTypeOrmEntity } from '../../domain/entities/reasigna
 import { FinalizarSoporteDto } from '../../application/dtos/finalizar-soporte.dto';
 import { SoporteArchivoActaTypeOrmEntity } from '../../domain/entities/acta.typeorm-entity';
 
+const normalizarPrioridad = (prioridad?: string | null): 'BAJA' | 'MEDIA' | 'ALTA' => {
+  const valor = String(prioridad || '').toUpperCase();
+  if (valor === 'BAJA') return 'BAJA';
+  if (valor === 'ALTA' || valor === 'URGENTE') return 'ALTA';
+  return 'MEDIA';
+};
+
 
 
 @Injectable()
 export class PostgresSoporteRepository implements SoporteRepositoryPort {
   private readonly logger = new Logger(PostgresSoporteRepository.name);
+  private esquemaUbicacionViaje: Promise<void> | null = null;
 
   constructor(
     @InjectDataSource(DB_CONNECTIONS.SIGHOV)
     private readonly dataSource: DataSource,
   ) { }
+
+  private async asegurarColumnasUbicacionViaje(): Promise<void> {
+    if (!this.esquemaUbicacionViaje) {
+      this.esquemaUbicacionViaje = this.dataSource.query(`
+        ALTER TABLE administracion.soporte_asignaciones
+          ADD COLUMN IF NOT EXISTS fecha_en_camino timestamp NULL,
+          ADD COLUMN IF NOT EXISTS latitud_en_camino double precision NULL,
+          ADD COLUMN IF NOT EXISTS longitud_en_camino double precision NULL,
+          ADD COLUMN IF NOT EXISTS fecha_llegada timestamp NULL,
+          ADD COLUMN IF NOT EXISTS latitud_llegada double precision NULL,
+          ADD COLUMN IF NOT EXISTS longitud_llegada double precision NULL
+      `).then(() => undefined).catch((error) => {
+        this.esquemaUbicacionViaje = null;
+        throw error;
+      });
+    }
+    await this.esquemaUbicacionViaje;
+  }
 
   async crearSolicitudTransaccional(idUsuario: number, dto: CreateSolicitudDto): Promise<any> {
     const queryRunner = this.dataSource.createQueryRunner();
@@ -73,6 +100,59 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
     }
   }
 
+  async crearSoporteManual(idTecnico: number, dto: CreateSoporteManualDto): Promise<any> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const prioridad = normalizarPrioridad(dto.prioridad);
+      const [solicitud] = await queryRunner.query(
+        `INSERT INTO administracion.soporte_solicitudes
+          (id_usuario, piso, oficina, consultorio, estado, es_manual, solicitante_manual, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, 'EN_PROCESO', TRUE, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+         RETURNING id, created_at`,
+        [
+          idTecnico,
+          dto.piso?.trim() || null,
+          dto.oficina.trim(),
+          dto.consultorio?.trim() || null,
+          dto.solicitante_nombre.trim(),
+        ],
+      );
+
+      const [item] = await queryRunner.query(
+        `INSERT INTO administracion.soporte_solicitud_items
+          (id_solicitud, id_tipo_soporte, descripcion, created_at)
+         VALUES ($1, 1, $2, CURRENT_TIMESTAMP)
+         RETURNING id`,
+        [solicitud.id, dto.descripcion.trim()],
+      );
+
+      const [asignacion] = await queryRunner.query(
+        `INSERT INTO administracion.soporte_asignaciones
+          (id_solicitud_item, id_soporte, id_asignado_por, fecha_asignacion, fecha_inicio, estado, observacion, prioridad)
+         VALUES ($1, $2, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'EN_PROCESO', $3, $4)
+         RETURNING id`,
+        [item.id, idTecnico, `Soporte presencial registrado para ${dto.solicitante_nombre.trim()}.`, prioridad],
+      );
+
+      await queryRunner.commitTransaction();
+      return {
+        idSolicitud: Number(solicitud.id),
+        idAsignacion: Number(asignacion.id),
+        estado: 'EN_PROCESO',
+        prioridad,
+      };
+    } catch (error: any) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error(`Error registrando soporte manual: ${error?.message}`, error?.stack);
+      throw new InternalServerErrorException(error?.message || 'No se pudo guardar el soporte manual.');
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
   async asignarSoporteTransaccional(idOperador: number, dto: AsignarSoporteDto): Promise<any> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -107,7 +187,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         throw new Error('Faltan datos para asignar el soporte (id_solicitud_item o id_soporte).');
       }
 
-      const prioridadValida = (dto.prioridad || 'NORMAL').toUpperCase();
+      const prioridadValida = normalizarPrioridad(dto.prioridad);
 
       const asignacionQuery = `
         INSERT INTO administracion.soporte_asignaciones 
@@ -184,6 +264,12 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         throw new Error('La asignación no existe o no te pertenece.');
       }
 
+      const solicitudRows = await queryRunner.query(
+        `SELECT id_solicitud FROM administracion.soporte_solicitud_items WHERE id = $1`,
+        [asignacion.idSolicitudItem],
+      );
+      const idSolicitud = Number(solicitudRows?.[0]?.id_solicitud);
+
       // 2. Insertar en soporte_reasignaciones usando Entidad
       const nuevaReasignacion = new SoporteReasignacionTypeOrmEntity();
       nuevaReasignacion.idAsignacion = idAsignacion;
@@ -214,7 +300,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
           (id_solicitud_item, id_soporte, id_asignado_por, fecha_asignacion, fecha_inicio, fecha_fin, estado, observacion, prioridad)
          VALUES ($1, $2, $3, CURRENT_TIMESTAMP, NULL, NULL, 'ASIGNADA', NULL, $4)
          RETURNING id`,
-        [asignacion.idSolicitudItem, Number(dto.id_a_soporte), idDeSoporte, asignacion.prioridad ?? 'NORMAL']
+        [asignacion.idSolicitudItem, Number(dto.id_a_soporte), idDeSoporte, normalizarPrioridad(asignacion.prioridad)]
       );
 
       // Aseguramos que la solicitud vuelva a ASIGNADA para el nuevo técnico
@@ -231,6 +317,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       return {
         idAsignacionAnterior: asignacion.id,
         idAsignacion: Number(nuevaAsignacion[0].id),
+        idSolicitud,
         nuevoTecnico: dto.id_a_soporte,
       };
 
@@ -315,6 +402,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
     }
   }
   async obtenerMisSolicitudesUsuario(idUsuario: number, estadoFiltro?: string): Promise<any[]> {
+    await this.asegurarColumnasUbicacionViaje();
     let query = `
       SELECT 
         s.id,
@@ -324,6 +412,9 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         s.oficina,
         s.consultorio,
         s.estado,
+        BOOL_OR(s.es_manual) as es_manual,
+        MAX(s.solicitante_manual) as solicitante_manual,
+        s.created_at as fecha_solicitud,
         s.created_at as "createdAt",
         s.updated_at as "updatedAt",
         MAX(a.id) as id_asignacion,
@@ -336,8 +427,25 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         MAX(a.fecha_asignacion) as fecha_asignacion,
         MAX(a.fecha_inicio) as fecha_inicio,
         MAX(a.fecha_fin) as fecha_finalizacion,
-        MAX(GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_asignacion))))::int) as segundos_desde_asignacion,
+        MAX(a.fecha_en_camino) as fecha_en_camino,
+        MAX(a.latitud_en_camino) as latitud_en_camino,
+        MAX(a.longitud_en_camino) as longitud_en_camino,
+        MAX(a.fecha_llegada) as fecha_llegada,
+        MAX(a.latitud_llegada) as latitud_llegada,
+        MAX(a.longitud_llegada) as longitud_llegada,
+        MAX(GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_inicio, a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_asignacion))))::int) as segundos_desde_asignacion,
         MAX(CASE WHEN a.fecha_inicio IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_inicio))))::int ELSE NULL END) as segundos_desde_inicio,
+        (SELECT c.calificacion FROM administracion.soporte_calificaciones c WHERE c.id_solicitud = s.id LIMIT 1) as calificacion_usuario,
+        (SELECT c.created_at FROM administracion.soporte_calificaciones c WHERE c.id_solicitud = s.id LIMIT 1) as fecha_calificacion_usuario,
+        (SELECT MIN(ax.fecha_asignacion)
+         FROM administracion.soporte_asignaciones ax
+         INNER JOIN administracion.soporte_solicitud_items six ON six.id = ax.id_solicitud_item
+         WHERE six.id_solicitud = s.id) as fecha_primera_asignacion,
+        (SELECT GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (MIN(ax.fecha_asignacion) - s.created_at))))::int
+         FROM administracion.soporte_asignaciones ax
+         INNER JOIN administracion.soporte_solicitud_items six ON six.id = ax.id_solicitud_item
+         WHERE six.id_solicitud = s.id
+         HAVING COUNT(*) > 0) as segundos_hasta_asignacion,
         MAX(COALESCE(NULLIF(TRIM(CONCAT_WS(' ', p.nombres, p.p_apellido, p.s_apellido)), ''), u.name)) as nombre_tecnico,
         (
           SELECT COUNT(*)::int
@@ -362,6 +470,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       LEFT JOIN administracion.users u ON u.id = a.id_soporte
       LEFT JOIN administracion.persona p ON p.id = u.id_persona
       WHERE s.id_usuario = $1
+        AND COALESCE(s.es_manual, FALSE) = FALSE
     `;
 
     const params: any[] = [idUsuario];
@@ -378,11 +487,79 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
     return await this.dataSource.query(query, params);
   }
 
+  async obtenerCalificacionSolicitud(idSolicitud: number, idUsuario: number): Promise<any> {
+    const rows = await this.dataSource.query(`
+      SELECT c.calificacion, c.created_at as fecha_calificacion,
+        COALESCE(NULLIF(TRIM(CONCAT_WS(' ', p.nombres, p.p_apellido, p.s_apellido)), ''), u.name) as nombre_tecnico
+      FROM administracion.soporte_solicitudes s
+      JOIN administracion.soporte_solicitud_items si ON si.id_solicitud = s.id
+      JOIN LATERAL (
+        SELECT ax.id, ax.id_soporte FROM administracion.soporte_asignaciones ax
+        WHERE ax.id_solicitud_item = si.id AND ax.estado = 'FINALIZADA'
+        ORDER BY ax.id DESC LIMIT 1
+      ) a ON TRUE
+      JOIN administracion.users u ON u.id = a.id_soporte
+      LEFT JOIN administracion.persona p ON p.id = u.id_persona
+      LEFT JOIN administracion.soporte_calificaciones c ON c.id_solicitud = s.id
+      WHERE s.id = $1 AND s.id_usuario = $2 AND s.estado = 'FINALIZADA'
+        AND COALESCE(s.es_manual, FALSE) = FALSE
+      ORDER BY a.id DESC LIMIT 1
+    `, [idSolicitud, idUsuario]);
+    if (!rows.length) return null;
+    return rows[0];
+  }
+
+  async calificarTecnico(idSolicitud: number, idUsuario: number, calificacion: 'MUY_BIEN' | 'BIEN' | 'MAL'): Promise<any> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      const solicitud = await queryRunner.query(`
+        SELECT s.id FROM administracion.soporte_solicitudes s
+        WHERE s.id = $1 AND s.id_usuario = $2 AND s.estado = 'FINALIZADA'
+          AND COALESCE(s.es_manual, FALSE) = FALSE
+        FOR UPDATE
+      `, [idSolicitud, idUsuario]);
+      if (!solicitud.length) throw new ConflictException('La solicitud no está finalizada o no te pertenece.');
+
+      const existente = await queryRunner.query(
+        `SELECT id FROM administracion.soporte_calificaciones WHERE id_solicitud = $1`, [idSolicitud],
+      );
+      if (existente.length) throw new ConflictException('Este soporte ya fue calificado y no se puede cambiar.');
+
+      const filas = await queryRunner.query(`
+        INSERT INTO administracion.soporte_calificaciones
+          (id_solicitud, id_asignacion, id_usuario, id_tecnico, calificacion)
+        SELECT $1, a.id, $2, a.id_soporte, $3
+        FROM administracion.soporte_solicitud_items si
+        JOIN LATERAL (
+          SELECT ax.id, ax.id_soporte FROM administracion.soporte_asignaciones ax
+          WHERE ax.id_solicitud_item = si.id AND ax.estado = 'FINALIZADA'
+          ORDER BY ax.id DESC LIMIT 1
+        ) a ON TRUE
+        WHERE si.id_solicitud = $1
+        ORDER BY a.id DESC LIMIT 1
+        RETURNING id, calificacion, created_at as fecha_calificacion
+      `, [idSolicitud, idUsuario, calificacion]);
+      if (!filas.length) throw new ConflictException('No se encontró el técnico que finalizó el soporte.');
+      await queryRunner.commitTransaction();
+      return filas[0];
+    } catch (error: any) {
+      await queryRunner.rollbackTransaction();
+      if (error instanceof ConflictException) throw error;
+      if (error?.code === '23505') throw new ConflictException('No se pudo actualizar la calificación de este soporte.');
+      throw new InternalServerErrorException(error?.message || 'No se pudo guardar la calificación.');
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
   // BANDEJA 2: Lo que ve el Operador (Normalmente PENDIENTES)
   // =========================================================
   // BANDEJA OPERADOR: Solicitudes + Alertas de Re-solicitud
   // =========================================================
   async obtenerBandejaOperador(estadoFiltro?: string): Promise<any[]> {
+    await this.asegurarColumnasUbicacionViaje();
     let query = `
       SELECT 
         s.id as id_solicitud, 
@@ -390,6 +567,8 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         s.piso, 
         s.oficina, 
         s.estado,
+        BOOL_OR(s.es_manual) as es_manual,
+        MAX(s.solicitante_manual) as solicitante_manual,
         COUNT(DISTINCT rs.id)::int as cantidad_resolicitudes,
         MAX(COALESCE(to_jsonb(rs)->>'fecha_resolicitud', to_jsonb(rs)->>'fecha', to_jsonb(rs)->>'created_at')) as ultima_resolicitud,
         (
@@ -411,8 +590,25 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         MAX(a.fecha_asignacion) as fecha_asignacion,
         MAX(a.fecha_inicio) as fecha_inicio,
         MAX(a.fecha_fin) as fecha_finalizacion,
-        MAX(GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_asignacion))))::int) as segundos_desde_asignacion,
+        MAX(a.fecha_en_camino) as fecha_en_camino,
+        MAX(a.latitud_en_camino) as latitud_en_camino,
+        MAX(a.longitud_en_camino) as longitud_en_camino,
+        MAX(a.fecha_llegada) as fecha_llegada,
+        MAX(a.latitud_llegada) as latitud_llegada,
+        MAX(a.longitud_llegada) as longitud_llegada,
+        MAX(GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_inicio, a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_asignacion))))::int) as segundos_desde_asignacion,
         MAX(CASE WHEN a.fecha_inicio IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_inicio))))::int ELSE NULL END) as segundos_desde_inicio,
+        (SELECT c.calificacion FROM administracion.soporte_calificaciones c WHERE c.id_solicitud = s.id LIMIT 1) as calificacion_usuario,
+        (SELECT c.created_at FROM administracion.soporte_calificaciones c WHERE c.id_solicitud = s.id LIMIT 1) as fecha_calificacion_usuario,
+        (SELECT MIN(ax.fecha_asignacion)
+         FROM administracion.soporte_asignaciones ax
+         INNER JOIN administracion.soporte_solicitud_items six ON six.id = ax.id_solicitud_item
+         WHERE six.id_solicitud = s.id) as fecha_primera_asignacion,
+        (SELECT GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (MIN(ax.fecha_asignacion) - s.created_at))))::int
+         FROM administracion.soporte_asignaciones ax
+         INNER JOIN administracion.soporte_solicitud_items six ON six.id = ax.id_solicitud_item
+         WHERE six.id_solicitud = s.id
+         HAVING COUNT(*) > 0) as segundos_hasta_asignacion,
         MAX(COALESCE(NULLIF(TRIM(CONCAT_WS(' ', p.nombres, p.p_apellido, p.s_apellido)), ''), u.name)) as nombre_tecnico,
         (
           SELECT r.justificacion
@@ -422,7 +618,14 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
           WHERE si2.id_solicitud = s.id
           ORDER BY r.id DESC
           LIMIT 1
-        ) as ultima_reasignacion_motivo
+        ) as ultima_reasignacion_motivo,
+        (
+          SELECT COUNT(*)::int
+          FROM administracion.soporte_reasignaciones r
+          INNER JOIN administracion.soporte_asignaciones a2 ON a2.id = r.id_asignacion
+          INNER JOIN administracion.soporte_solicitud_items si2 ON si2.id = a2.id_solicitud_item
+          WHERE si2.id_solicitud = s.id
+        ) as cantidad_reasignaciones
         
       FROM administracion.soporte_solicitudes s
       LEFT JOIN administracion.soporte_re_solicitudes rs ON rs.id_solicitud = s.id
@@ -493,6 +696,8 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         a.id as id_asignacion,
         s.id as id_solicitud,
         s.oficina,
+        s.es_manual,
+        s.solicitante_manual,
         a.id_soporte as id_tecnico, 
         a.estado,
         a.fecha_asignacion,
@@ -526,19 +731,38 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
 
   // BANDEJA 3: Lo que ve el Técnico de Soporte
   async obtenerMisTareasTecnico(idSoporte: number, estadoFiltro?: string): Promise<any[]> {
+    await this.asegurarColumnasUbicacionViaje();
     let query = `
       SELECT 
         a.id as id_asignacion,
         s.id as id_solicitud,
+        s.created_at as fecha_solicitud,
+        (SELECT MIN(ax.fecha_asignacion)
+         FROM administracion.soporte_asignaciones ax
+         INNER JOIN administracion.soporte_solicitud_items six ON six.id = ax.id_solicitud_item
+         WHERE six.id_solicitud = s.id) as fecha_primera_asignacion,
+        (SELECT GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (MIN(ax.fecha_asignacion) - s.created_at))))::int
+         FROM administracion.soporte_asignaciones ax
+         INNER JOIN administracion.soporte_solicitud_items six ON six.id = ax.id_solicitud_item
+         WHERE six.id_solicitud = s.id
+         HAVING COUNT(*) > 0) as segundos_hasta_asignacion,
         s.piso,
         s.oficina,
         s.consultorio,
+        s.es_manual,
+        s.solicitante_manual,
         a.estado,
         a.prioridad,
         CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN legado.fecha_derivacion ELSE a.fecha_asignacion END as fecha_asignacion,
         CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN NULL ELSE a.fecha_inicio END as fecha_inicio,
         a.fecha_fin as fecha_finalizacion,
-        GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN legado.fecha_derivacion ELSE a.fecha_asignacion END))))::int as segundos_desde_asignacion,
+        a.fecha_en_camino,
+        a.latitud_en_camino,
+        a.longitud_en_camino,
+        a.fecha_llegada,
+        a.latitud_llegada,
+        a.longitud_llegada,
+        GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_inicio, a.fecha_fin, CURRENT_TIMESTAMP) - CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN legado.fecha_derivacion ELSE a.fecha_asignacion END))))::int as segundos_desde_asignacion,
         CASE WHEN a.fecha_inicio IS NOT NULL AND NOT (a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL) THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_inicio))))::int ELSE NULL END as segundos_desde_inicio,
         a.observacion as diagnostico,
         (
@@ -600,11 +824,17 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         FROM administracion.soporte_reasignaciones r
         WHERE r.id_asignacion = a.id
       ) legado ON TRUE
-      WHERE a.id_soporte = $1 AND a.estado <> 'DERIVADA'
+      WHERE a.id_soporte = $1
     `;
 
     const params: any[] = [idSoporte];
-    if (estadoFiltro) {
+    if (estadoFiltro === 'DERIVADA') {
+      query += ` AND a.estado = $2`;
+      params.push('DERIVADA');
+    } else {
+      query += ` AND a.estado <> 'DERIVADA'`;
+    }
+    if (estadoFiltro && estadoFiltro !== 'DERIVADA') {
       query += ` AND a.estado = $2`;
       params.push(estadoFiltro);
     }
@@ -738,7 +968,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
           CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN legado.fecha_derivacion ELSE a.fecha_asignacion END AS fecha_asignacion,
           CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN NULL ELSE a.fecha_inicio END AS fecha_inicio,
           a.fecha_fin, a.estado,
-          GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN legado.fecha_derivacion ELSE a.fecha_asignacion END))))::int AS segundos_desde_asignacion,
+          GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_inicio, a.fecha_fin, CURRENT_TIMESTAMP) - CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN legado.fecha_derivacion ELSE a.fecha_asignacion END))))::int AS segundos_desde_asignacion,
           CASE WHEN a.fecha_inicio IS NOT NULL AND NOT (a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL)
             THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_inicio))))::int
             ELSE NULL END AS segundos_en_proceso,
@@ -865,6 +1095,37 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
   }
 
   // TÉCNICO: Poner soporte EN_PROCESO
+  async registrarTecnicoEnCamino(idAsignacion: number, idSoporte: number, latitud: number, longitud: number): Promise<any> {
+    await this.asegurarColumnasUbicacionViaje();
+    const filas = await this.dataSource.query(
+      `UPDATE administracion.soporte_asignaciones
+       SET fecha_en_camino = COALESCE(fecha_en_camino, CURRENT_TIMESTAMP),
+           latitud_en_camino = COALESCE(latitud_en_camino, $3),
+           longitud_en_camino = COALESCE(longitud_en_camino, $4)
+       WHERE id = $1 AND id_soporte = $2 AND estado IN ('ASIGNADA', 'EN_PROCESO')
+       RETURNING id AS id_asignacion, fecha_en_camino, latitud_en_camino, longitud_en_camino,
+         fecha_llegada, latitud_llegada, longitud_llegada`,
+      [idAsignacion, idSoporte, latitud, longitud],
+    );
+    return filas?.[0] ?? null;
+  }
+
+  async registrarLlegadaTecnico(idAsignacion: number, idSoporte: number, latitud: number, longitud: number): Promise<any> {
+    await this.asegurarColumnasUbicacionViaje();
+    const filas = await this.dataSource.query(
+      `UPDATE administracion.soporte_asignaciones
+       SET fecha_llegada = COALESCE(fecha_llegada, CURRENT_TIMESTAMP),
+           latitud_llegada = COALESCE(latitud_llegada, $3),
+           longitud_llegada = COALESCE(longitud_llegada, $4)
+       WHERE id = $1 AND id_soporte = $2 AND estado IN ('ASIGNADA', 'EN_PROCESO')
+         AND fecha_en_camino IS NOT NULL
+       RETURNING id AS id_asignacion, fecha_en_camino, latitud_en_camino, longitud_en_camino,
+         fecha_llegada, latitud_llegada, longitud_llegada`,
+      [idAsignacion, idSoporte, latitud, longitud],
+    );
+    return filas?.[0] ?? null;
+  }
+
   async ponerEnProcesoSoporte(idSolicitud: number, idSoporte: number): Promise<any> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -941,10 +1202,6 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
 
       const asignacion = asignacionActual[0];
 
-      if (asignacion.estado === 'EN_PROCESO' || asignacion.estado_solicitud === 'EN_PROCESO') {
-        throw new Error('El técnico ya puso este soporte EN PROCESO. No se puede reasignar mientras está siendo atendido.');
-      }
-
       if (Number(asignacion.id_soporte) === Number(idNuevoTecnico)) {
         throw new Error('El ticket ya está asignado a este mismo técnico.');
       }
@@ -957,7 +1214,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         [asignacion.id, asignacion.id_soporte, idNuevoTecnico, justificacion]
       );
 
-      const prioridadFinal = (prioridad || asignacion.prioridad || 'NORMAL').toUpperCase();
+      const prioridadFinal = normalizarPrioridad(prioridad || asignacion.prioridad);
 
       // 3. Cerramos la asignación anterior y guardamos su tiempo.
       await queryRunner.query(
@@ -973,6 +1230,13 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
          VALUES ($1, $2, $3, CURRENT_TIMESTAMP, NULL, NULL, 'ASIGNADA', NULL, $4)
          RETURNING id`,
         [asignacion.id_solicitud_item, idNuevoTecnico, idOperador || asignacion.id_asignado_por, prioridadFinal]
+      );
+
+      await queryRunner.query(
+        `UPDATE administracion.soporte_solicitudes
+         SET estado = 'ASIGNADA', updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [idSolicitud]
       );
 
       await queryRunner.commitTransaction();

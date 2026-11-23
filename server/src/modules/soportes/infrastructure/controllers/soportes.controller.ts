@@ -8,6 +8,7 @@ import { multerAdjuntoSolicitudConfig } from '../config/multer-adjunto-solicitud
 import { AuthGuard } from '@nestjs/passport';
 import { CreateSolicitudUseCase } from '../../application/use-cases/create-solicitud.use-case';
 import { CreateSolicitudDto } from '../../application/dtos/create-solicitud.dto';
+import { CreateSoporteManualDto } from '../../application/dtos/create-soporte-manual.dto';
 import { SoporteExceptionFilter } from '../filters/soporte-exception.filter';
 import { AsignarSoporteUseCase } from '../../application/use-cases/asignar-soporte.use-case';
 import { AsignarSoporteDto } from '../../application/dtos/asignar-soporte.dto';
@@ -49,6 +50,24 @@ export class SoportesController {
       data: response.datos ?? response
     };
   }
+
+  @Post('manual')
+  async crearSoporteManual(@Req() req: any, @Body() dto: CreateSoporteManualDto) {
+    const idTecnico = Number(req.user?.id);
+    const rolesActivos: string[] = await this.soporteRepo.obtenerRolesDeUsuario(idTecnico);
+    if (!rolesActivos.includes('TECNICO')) {
+      throw new ForbiddenException('Solo un usuario con rol TÉCNICO activo puede registrar un soporte manual.');
+    }
+
+    const datos = await this.soporteRepo.crearSoporteManual(idTecnico, dto);
+    return {
+      status: 201,
+      success: true,
+      message: 'Soporte manual registrado y puesto EN PROCESO.',
+      data: datos,
+    };
+  }
+
   @Post('asignar')
   async asignarSoporte(@Body() dto: AsignarSoporteDto, @Req() req: any) {
     const idOperador = req.user?.id;
@@ -129,6 +148,60 @@ export class SoportesController {
       data: response.datos
     };
   }
+
+  @Get('solicitud/:id/calificacion')
+  async obtenerCalificacion(
+    @Param('id', ParseIntPipe) idSolicitud: number,
+    @Req() req: any,
+  ) {
+    const datos = await this.soporteRepo.obtenerCalificacionSolicitud(idSolicitud, Number(req.user?.id));
+    if (!datos) throw new BadRequestException('No se encontró una solicitud finalizada que te pertenezca.');
+    return { status: 200, success: true, data: datos };
+  }
+
+  @Post('solicitud/:id/calificacion')
+  async calificarTecnico(
+    @Param('id', ParseIntPipe) idSolicitud: number,
+    @Body() body: { calificacion?: string },
+    @Req() req: any,
+  ) {
+    const calificacion = String(body?.calificacion || '').toUpperCase();
+    if (!['MUY_BIEN', 'BIEN', 'MAL'].includes(calificacion)) {
+      throw new BadRequestException('Selecciona Muy bien, Bien o Mal.');
+    }
+    const datos = await this.soporteRepo.calificarTecnico(
+      idSolicitud,
+      Number(req.user?.id),
+      calificacion as 'MUY_BIEN' | 'BIEN' | 'MAL',
+    );
+    return { status: 201, success: true, message: 'Gracias por calificar la atención.', data: datos };
+  }
+
+  @Get('notificaciones')
+  async listarNotificaciones(@Req() req: any) {
+    const idUsuario = Number(req.user?.id);
+    const datos = await this.notificationService.listarNotificaciones(idUsuario);
+    return { status: 200, success: true, data: datos };
+  }
+
+  @Patch('notificaciones/:id/leida')
+  async marcarNotificacionLeida(
+    @Param('id', ParseIntPipe) idNotificacion: number,
+    @Req() req: any,
+  ) {
+    const idUsuario = Number(req.user?.id);
+    const notificacion = await this.notificationService.marcarNotificacionLeida(idUsuario, idNotificacion);
+    if (!notificacion) throw new BadRequestException('La notificación no existe o no te pertenece.');
+    return { status: 200, success: true, data: notificacion };
+  }
+
+  @Patch('notificaciones/leidas')
+  async marcarTodasNotificacionesLeidas(@Req() req: any) {
+    const idUsuario = Number(req.user?.id);
+    const cantidad = await this.notificationService.marcarTodasLeidas(idUsuario);
+    return { status: 200, success: true, data: { cantidad } };
+  }
+
   @Post('solicitud/:id/resolicitar')
   async resolicitar(
     @Param('id', ParseIntPipe) idSolicitud: number,
@@ -271,6 +344,43 @@ export class SoportesController {
     };
   }
 
+  @Post('asignacion/:id/en-camino')
+  async registrarEnCamino(
+    @Param('id', ParseIntPipe) idAsignacion: number,
+    @Body() body: { latitud: number; longitud: number },
+    @Req() req: any,
+  ) {
+    const { latitud, longitud } = this.validarCoordenadas(body);
+    const datos = await this.soporteRepo.registrarTecnicoEnCamino(
+      idAsignacion, Number(req.user?.id), latitud, longitud,
+    );
+    if (!datos) throw new BadRequestException('No se encontró una asignación activa tuya para registrar el inicio del viaje.');
+    return { status: 200, success: true, message: 'Inicio del trayecto registrado.', data: datos };
+  }
+
+  @Post('asignacion/:id/llegada')
+  async registrarLlegada(
+    @Param('id', ParseIntPipe) idAsignacion: number,
+    @Body() body: { latitud: number; longitud: number },
+    @Req() req: any,
+  ) {
+    const { latitud, longitud } = this.validarCoordenadas(body);
+    const datos = await this.soporteRepo.registrarLlegadaTecnico(
+      idAsignacion, Number(req.user?.id), latitud, longitud,
+    );
+    if (!datos) throw new BadRequestException('Primero registra «En camino» en una asignación activa para registrar la llegada.');
+    return { status: 200, success: true, message: 'Hora y ubicación de llegada registradas.', data: datos };
+  }
+
+  private validarCoordenadas(body: { latitud: number; longitud: number }) {
+    const latitud = Number(body?.latitud);
+    const longitud = Number(body?.longitud);
+    if (!Number.isFinite(latitud) || latitud < -90 || latitud > 90 || !Number.isFinite(longitud) || longitud < -180 || longitud > 180) {
+      throw new BadRequestException('La ubicación GPS no contiene coordenadas válidas.');
+    }
+    return { latitud, longitud };
+  }
+
   @Post('solicitud/:id/reasignar-operador')
   async reasignarPorOperador(
     @Param('id', ParseIntPipe) idSolicitud: number,
@@ -288,6 +398,22 @@ export class SoportesController {
       body.prioridad,
       Number(req.user?.id)
     );
+
+    try {
+      await this.notificationService.enviarNotificacion(
+        Number(body.idTecnico),
+        'Soporte reasignado',
+        `Te asignaron el ticket #${idSolicitud}. Cambia al modo TÉCNICO para atenderlo.`,
+        {
+          idAsignacion: String(resultado?.idAsignacion ?? ''),
+          idSolicitud: String(idSolicitud),
+          rolDestino: 'TECNICO',
+          tipoNotificacion: 'ASIGNACION_TECNICO',
+        },
+      );
+    } catch (error) {
+      console.error('Reasignación completada, pero no se pudo enviar el aviso al técnico:', error);
+    }
 
     return {
       status: 200,

@@ -18,16 +18,17 @@ export class CreateSolicitudUseCase {
     // CORRECCIÓN 3: Renombrar a crearSolicitudTransaccional
     const nuevaSolicitud = await this.soporteRepository.crearSolicitudTransaccional(idUsuario, dto);
 
-    // 4. Enviar Notificación Push a los Operadores
-    // Asumimos que los operadores tienen un ID específico, o puedes enviar un broadcast
-    // Por ahora, enviaremos un log o una notificación a un ID de prueba (ej. 1)
+    // 4. Enviar Notificación Push a los Operadores activos
     try {
-      await this.notificationService.enviarNotificacion(
-        1, // ID del usuario operador destino (ajústalo según tu lógica de negocio)
-        'Nueva Solicitud de Soporte',
-        `El usuario #${idUsuario} ha solicitado soporte en ${dto.oficina}.`,
-        { idSolicitud: nuevaSolicitud.id?.toString() }
-      );
+      const tokensOperadores = await this.soporteRepository.obtenerTokensOperadoresActivos();
+      if (tokensOperadores && tokensOperadores.length > 0) {
+        await this.notificationService.enviarNotificacion(
+          tokensOperadores,
+          'Nueva Solicitud de Soporte',
+          `El usuario #${idUsuario} ha solicitado soporte en ${dto.oficina}.`,
+          { idSolicitud: nuevaSolicitud.id?.toString() }
+        );
+      }
     } catch (error) {
       console.error('La solicitud se guardó, pero falló la notificación:', error);
     }

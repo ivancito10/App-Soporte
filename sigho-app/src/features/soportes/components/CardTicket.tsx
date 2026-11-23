@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { TicketSoporte } from '../types/soporte.types';
 import { AppIcon } from '../../../core/components/AppIcon';
@@ -6,6 +6,8 @@ import { AppIcon } from '../../../core/components/AppIcon';
 interface Props {
     ticket: TicketSoporte;
     onPress: () => void;
+    mostrarTiempoEnVivo?: boolean;
+    ocultarTiempos?: boolean;
 }
 
 const obtenerEstiloEstado = (estado: string) => {
@@ -16,6 +18,8 @@ const obtenerEstiloEstado = (estado: string) => {
             return { texto: 'EN PROCESO', color: '#6d28d9', bg: '#f3e8ff', border: '#e9d5ff' };
         case 'ASIGNADA':
             return { texto: 'ASIGNADA', color: '#1d4ed8', bg: '#dbeafe', border: '#bfdbfe' };
+        case 'DERIVADA':
+            return { texto: 'DERIVADA', color: '#c2410c', bg: '#ffedd5', border: '#fed7aa' };
         case 'PENDIENTE':
         default:
             return { texto: 'PENDIENTE', color: '#b45309', bg: '#fef3c7', border: '#fde68a' };
@@ -24,9 +28,8 @@ const obtenerEstiloEstado = (estado: string) => {
 
 const obtenerInfoPrioridad = (prioridad?: string) => {
     const p = (prioridad || '').toUpperCase();
-    if (p === 'URGENTE') return { texto: 'URGENTE', dot: '#e74c3c', color: '#c0392b', bg: '#fdecea' };
-    if (p === 'ALTA') return { texto: 'ALTA', dot: '#e67e22', color: '#d35400', bg: '#fef5e7' };
-    if (p === 'NORMAL') return { texto: 'NORMAL', dot: '#2ecc71', color: '#27ae60', bg: '#eafaf1' };
+    if (p === 'URGENTE' || p === 'ALTA') return { texto: 'ALTA', dot: '#e74c3c', color: '#c0392b', bg: '#fdecea' };
+    if (p === 'NORMAL' || p === 'MEDIA') return { texto: 'MEDIA', dot: '#e67e22', color: '#d35400', bg: '#fef5e7' };
     if (p === 'BAJA') return { texto: 'BAJA', dot: '#3498db', color: '#2980b9', bg: '#ebf5fb' };
     return null;
 };
@@ -50,6 +53,42 @@ const formatearSegundos = (totalSegundos: number) => {
         return `${horas}h ${minutos}m ${segundos}s`;
     }
     return `${minutos}m ${segundos}s`;
+};
+
+const TiempoEnVivo = ({ ticket }: { ticket: TicketSoporte }) => {
+    const [ahora, setAhora] = useState(Date.now());
+    const estado = ticket.estado;
+    const fechaBase = estado === 'PENDIENTE'
+        ? ticket.fecha_solicitud
+        : estado === 'ASIGNADA'
+            ? ticket.fecha_asignacion
+            : estado === 'EN_PROCESO'
+                ? ticket.fecha_inicio
+                : undefined;
+    const etiqueta = estado === 'PENDIENTE'
+        ? 'Solicitud sin asignar'
+        : estado === 'ASIGNADA'
+            ? 'Tiempo asignado'
+            : 'Tiempo en proceso';
+
+    useEffect(() => {
+        setAhora(Date.now());
+        const intervalo = setInterval(() => setAhora(Date.now()), 1000);
+        return () => clearInterval(intervalo);
+    }, [ticket.id_solicitud, ticket.estado, fechaBase]);
+
+    if (!fechaBase || estado === 'FINALIZADA') return null;
+    const fechaMs = new Date(fechaBase).getTime();
+    if (!Number.isFinite(fechaMs)) return null;
+
+    return (
+        <View style={styles.liveTimerBox}>
+            <AppIcon name="clock" size={14} color="#1e40af" />
+            <Text style={styles.liveTimerText}>
+                {etiqueta}: <Text style={styles.liveTimerValue}>{formatearSegundos((ahora - fechaMs) / 1000)}</Text>
+            </Text>
+        </View>
+    );
 };
 
 const obtenerTiempoTotalAsignacion = (ticket: TicketSoporte) => {
@@ -81,7 +120,7 @@ const IconoSoporteCircular = () => (
     </View>
 );
 
-export const CardTicket = ({ ticket, onPress }: Props) => {
+export const CardTicket = ({ ticket, onPress, mostrarTiempoEnVivo = false, ocultarTiempos = false }: Props) => {
     const idReal = ticket.id || ticket.id_solicitud;
     const estiloEstado = obtenerEstiloEstado(ticket.estado);
     const numInsistencias = Number(ticket.cantidad_resolicitudes || 0);
@@ -126,6 +165,12 @@ export const CardTicket = ({ ticket, onPress }: Props) => {
                             </Text>
                         </View>
                     )}
+
+                    {ticket.es_manual && (
+                        <View style={[styles.softPill, { backgroundColor: '#ecfeff', borderColor: '#67e8f9' }]}>
+                            <Text style={[styles.softPillText, { color: '#0e7490' }]}>MANUAL</Text>
+                        </View>
+                    )}
                 </View>
 
                 <Text style={styles.ticketIdRight}>
@@ -150,6 +195,15 @@ export const CardTicket = ({ ticket, onPress }: Props) => {
 
             {/* 3. DETALLES CON ICONOS VECTORIALES LIMPIOS */}
             <View style={styles.detailsList}>
+                {ticket.es_manual && (
+                    <View style={styles.iconRowItem}>
+                        <AppIcon name="user" size={15} color="#0e7490" />
+                        <Text style={[styles.detailRowText, { color: '#0e7490', fontWeight: '600', marginLeft: 7 }]}>
+                            Solicitud verbal de: {ticket.solicitante_manual || 'Solicitante sin nombre'}
+                        </Text>
+                    </View>
+                )}
+
                 {ticket.estado === 'EN_PROCESO' ? (
                     <View style={styles.iconRowItem}>
                         <AppIcon name="wrench" size={15} color="#6d28d9" />
@@ -180,8 +234,12 @@ export const CardTicket = ({ ticket, onPress }: Props) => {
                     </Text>
                 </View>
 
+                {mostrarTiempoEnVivo && ticket.estado !== 'FINALIZADA' && (
+                    <TiempoEnVivo ticket={ticket} />
+                )}
+
                 {/* HORAS Y TIEMPOS EN TICKETS FINALIZADOS */}
-                {ticket.estado === 'FINALIZADA' && (
+                {ticket.estado === 'FINALIZADA' && !ocultarTiempos && (
                     <View style={styles.historyTimesBox}>
                         <View style={styles.iconRowItem}>
                             <AppIcon name="calendar" size={13} color="#1e40af" />
@@ -351,6 +409,27 @@ const styles = StyleSheet.create({
     detailRowText: {
         fontSize: 13,
         color: '#334155',
+    },
+    liveTimerBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 7,
+        backgroundColor: '#eff6ff',
+        borderRadius: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        marginTop: 2,
+    },
+    liveTimerText: {
+        flex: 1,
+        color: '#1e40af',
+        fontSize: 12.5,
+        fontWeight: '600',
+    },
+    liveTimerValue: {
+        color: '#0f294a',
+        fontWeight: 'bold',
+        fontVariant: ['tabular-nums'],
     },
     historyTimesBox: {
         marginTop: 6,

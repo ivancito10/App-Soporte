@@ -7,7 +7,9 @@ import {
     TouchableOpacity,
     Image,
     Platform,
+    ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../theme/theme';
 import { AppIcon, NombreIcono } from './AppIcon';
 
@@ -18,6 +20,7 @@ interface MenuLateralModalProps {
     rolActivo: string;
     onSelectRol: (nuevoRol: string) => void;
     onLogout?: () => void;
+    nombreUsuario?: string;
 }
 
 const INFO_ROLES: Record<
@@ -61,10 +64,13 @@ export const MenuLateralModal = ({
     rolActivo,
     onSelectRol,
     onLogout,
+    nombreUsuario,
 }: MenuLateralModalProps) => {
+    const insets = useSafeAreaInsets();
     const rolesLimpios = Array.from(
         new Set((rolesDisponibles || []).map((r) => String(r).toUpperCase()).filter(Boolean))
     );
+    const soloUnRol = rolesLimpios.length === 1;
 
     return (
         <Modal
@@ -72,33 +78,50 @@ export const MenuLateralModal = ({
             transparent={true}
             visible={visible}
             onRequestClose={onClose}
+            statusBarTranslucent={Platform.OS === 'android'}
+            navigationBarTranslucent={Platform.OS === 'android'}
         >
             <View style={styles.overlay}>
                 {/* Panel lateral izquierdo */}
-                <View style={styles.drawer}>
+                <View style={[styles.drawer, {
+                    paddingTop: Math.max(insets.top, Platform.OS === 'web' ? 24 : 12),
+                    paddingBottom: Math.max(insets.bottom, 16),
+                }]}>
                     {/* Cabecera del menú lateral */}
                     <View style={styles.drawerHeader}>
-                        <View style={styles.logoBadge}>
-                            <Image
-                                source={require('../../../assets/ssu-logo.png')}
-                                style={{ width: 96, height: 40 }}
-                                resizeMode="contain"
-                            />
-                        </View>
+                        <Image
+                            source={require('../../../assets/ssu-logo-transparent.png')}
+                            style={styles.logo}
+                            resizeMode="contain"
+                        />
 
                         <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
                             <Text style={styles.closeBtnText}>✕</Text>
                         </TouchableOpacity>
                     </View>
 
-                    <Text style={styles.drawerTitle}>Cambiar Modo / Rol</Text>
+                    <View style={styles.profileCard}>
+                        <View style={styles.avatar}><AppIcon name="user" size={21} color="#ffffff" /></View>
+                        <View style={styles.profileInfo}>
+                            <Text style={styles.profileEyebrow}>CUENTA ACTIVA</Text>
+                            <Text style={styles.profileName} numberOfLines={1}>{nombreUsuario?.trim() || 'Funcionario'}</Text>
+                            <Text style={styles.profileRole} numberOfLines={1}>{String(rolActivo || 'SIN ROL').replace('_', ' ')}</Text>
+                        </View>
+                    </View>
+
+                    <Text style={styles.drawerTitle}>{soloUnRol ? 'Mi cuenta' : 'Cambiar Modo / Rol'}</Text>
                     <Text style={styles.drawerSubtitle}>
-                        Tienes {rolesLimpios.length} roles asignados en tu cuenta:
+                        {soloUnRol ? 'Tu perfil de acceso está activo.' : `Tienes ${rolesLimpios.length} roles asignados en tu cuenta:`}
                     </Text>
 
                     {/* Lista de roles del usuario */}
-                    <View style={styles.rolesList}>
-                        {rolesLimpios.map((rolKey) => {
+                    <ScrollView
+                        style={styles.rolesList}
+                        contentContainerStyle={styles.rolesContent}
+                        showsVerticalScrollIndicator={false}
+                        keyboardShouldPersistTaps="handled"
+                    >
+                        {!soloUnRol && rolesLimpios.map((rolKey) => {
                             const info = INFO_ROLES[rolKey] || {
                                 titulo: `Modo ${rolKey}`,
                                 subtitulo: 'Acceder a la vista de este rol',
@@ -141,7 +164,7 @@ export const MenuLateralModal = ({
                                 </TouchableOpacity>
                             );
                         })}
-                    </View>
+                    </ScrollView>
 
                     {/* Pie del menú lateral */}
                     <View style={styles.drawerFooter}>
@@ -178,19 +201,16 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0, 0, 0, 0.5)',
     },
     drawer: {
-        width: '82%',
-        maxWidth: 330,
+        width: '70%',
+        maxWidth: 300,
         backgroundColor: '#ffffff',
         height: '100%',
-        paddingTop: Platform.OS === 'web' ? 24 : 46,
-        paddingHorizontal: 18,
-        paddingBottom: 24,
+        paddingHorizontal: 14,
         elevation: 10,
         shadowColor: '#000',
         shadowOffset: { width: 3, height: 0 },
         shadowOpacity: 0.25,
         shadowRadius: 8,
-        justifyContent: 'space-between',
     },
     backdropTouch: {
         flex: 1,
@@ -204,14 +224,20 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: '#edf2f7',
     },
-    logoBadge: {
-        backgroundColor: '#f8fafc',
-        borderRadius: 8,
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderWidth: 1,
-        borderColor: '#e2e8f0',
+    logo: { width: 140, height: 52 },
+    profileCard: {
+        flexDirection: 'row', alignItems: 'center', gap: 10,
+        marginTop: 14, padding: 11, borderRadius: 14,
+        backgroundColor: '#f1f6fc', borderWidth: 1, borderColor: '#dce7f5',
     },
+    avatar: {
+        width: 44, height: 44, borderRadius: 22, backgroundColor: theme.colors.primary,
+        alignItems: 'center', justifyContent: 'center',
+    },
+    profileInfo: { flex: 1 },
+    profileEyebrow: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, color: '#64748b' },
+    profileName: { marginTop: 2, fontSize: 15, fontWeight: '700', color: '#1e293b' },
+    profileRole: { marginTop: 2, fontSize: 12, fontWeight: '600', color: theme.colors.primary },
     closeBtn: {
         width: 34,
         height: 34,
@@ -229,7 +255,7 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: 'bold',
         color: theme.colors.primary,
-        marginTop: 18,
+        marginTop: 16,
     },
     drawerSubtitle: {
         fontSize: 13,
@@ -237,14 +263,13 @@ const styles = StyleSheet.create({
         marginTop: 4,
         marginBottom: 14,
     },
-    rolesList: {
-        flex: 1,
-    },
+    rolesList: { flex: 1, minHeight: 0, marginHorizontal: -2 },
+    rolesContent: { paddingHorizontal: 2, paddingBottom: 12 },
     roleCard: {
         borderWidth: 1.5,
         borderRadius: 10,
-        padding: 13,
-        marginBottom: 12,
+        padding: 11,
+        marginBottom: 10,
     },
     roleHeaderRow: {
         flexDirection: 'row',
@@ -252,16 +277,16 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     roleTitle: {
-        fontSize: 14,
+        fontSize: 13,
         fontWeight: 'bold',
         flex: 1,
         marginRight: 6,
     },
     roleSubtitle: {
-        fontSize: 12,
+        fontSize: 11,
         color: '#64748b',
-        marginTop: 5,
-        lineHeight: 17,
+        marginTop: 4,
+        lineHeight: 15,
     },
     activePill: {
         paddingHorizontal: 7,
@@ -277,6 +302,7 @@ const styles = StyleSheet.create({
         borderTopWidth: 1,
         borderTopColor: '#edf2f7',
         paddingTop: 14,
+        marginTop: 8,
     },
     logoutDrawerBtn: {
         backgroundColor: '#fdecea',

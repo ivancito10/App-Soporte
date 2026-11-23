@@ -20,6 +20,7 @@ import { theme } from '../../../core/theme/theme';
 import { obtenerItem, guardarItem, eliminarItem } from '../../../core/utils/storage';
 import { MenuLateralModal } from '../../../core/components/MenuLateralModal';
 import { AppIcon, NombreIcono } from '../../../core/components/AppIcon';
+import { NotificacionesCampana } from '../../../core/components/NotificacionesCampana';
 import {
     obtenerUsuariosConRoles,
     asignarRolUsuario,
@@ -148,6 +149,7 @@ export const GestionRolesScreen = ({
     rolesDisponibles = ['ADMINISTRADOR'],
     onCambiarRol,
     onRolesActualizados,
+    onNotificacionSeleccionada,
 }: any) => {
     const { width } = useWindowDimensions();
     const insets = useSafeAreaInsets();
@@ -159,11 +161,12 @@ export const GestionRolesScreen = ({
     const [refrescando, setRefrescando] = useState<boolean>(false);
     const [guardandoAccion, setGuardandoAccion] = useState<boolean>(false);
     const [menuLateralVisible, setMenuLateralVisible] = useState<boolean>(false);
+    const [nombreUsuario, setNombreUsuario] = useState('');
     const [modalOpcionesVisible, setModalOpcionesVisible] = useState(false);
     const [tiposConOpciones, setTiposConOpciones] = useState<Array<{ id: number; nombre: string; opciones: Array<{ id: number; nombre: string; estado?: boolean }> }>>([]);
     const [nuevaOpcion, setNuevaOpcion] = useState('');
     const [tipoOpcionSeleccionado, setTipoOpcionSeleccionado] = useState<number | null>(null);
-    const tieneMultiplesRolesSesion = Array.isArray(rolesDisponibles) && rolesDisponibles.length > 1;
+    const mostrarMenuCuentaSesion = Array.isArray(rolesDisponibles) && rolesDisponibles.length > 0;
 
     const cargarTiposConOpciones = async () => {
         try {
@@ -198,6 +201,7 @@ export const GestionRolesScreen = ({
     // Buscador y pestañas
     const [busqueda, setBusqueda] = useState<string>('');
     const [tabActivo, setTabActivo] = useState<'ASIGNADOS' | 'TODOS'>('ASIGNADOS');
+    const [filtroRol, setFiltroRol] = useState<'USUARIO' | 'OPERADOR' | 'TECNICO' | 'ADMINISTRADOR' | null>(null);
 
     // ID del administrador logueado
     const [idAdminActual, setIdAdminActual] = useState<number | null>(null);
@@ -227,6 +231,7 @@ export const GestionRolesScreen = ({
             const userDataStr = await obtenerItem('userData');
             if (userDataStr) {
                 const userData = JSON.parse(userDataStr);
+                setNombreUsuario(userData.nombreCompleto || userData.nombre_completo || userData.nombre || userData.username || '');
                 if (userData?.id) {
                     setIdAdminActual(Number(userData.id));
                 }
@@ -263,9 +268,10 @@ export const GestionRolesScreen = ({
 
     const termino = busqueda.trim().toLowerCase();
     const personalAsignado = usuarios.filter((u) => obtenerRolesDeUsuario(u).length > 0);
-    const baseLista = tabActivo === 'ASIGNADOS' ? personalAsignado : usuarios;
+    const baseLista = filtroRol ? usuarios : tabActivo === 'ASIGNADOS' ? personalAsignado : usuarios;
 
     const usuariosFiltrados = baseLista.filter((u) => {
+        if (filtroRol && !obtenerRolesDeUsuario(u).includes(filtroRol)) return false;
         if (!termino) return true;
         const nombre = (u.nombre_completo || '').toLowerCase();
         const user = (u.username || '').toLowerCase();
@@ -471,7 +477,7 @@ export const GestionRolesScreen = ({
                     ]}
                 >
                     <View style={styles.leftBarGroup}>
-                        {tieneMultiplesRolesSesion && (
+                        {mostrarMenuCuentaSesion && (
                             <TouchableOpacity
                                 style={styles.iconActionBtn}
                                 onPress={() => setMenuLateralVisible(true)}
@@ -495,13 +501,19 @@ export const GestionRolesScreen = ({
                         Gestión de Roles
                     </Text>
 
-                    <TouchableOpacity
-                        style={styles.iconActionBtn}
-                        onPress={manejarCerrarSesion}
-                        activeOpacity={0.75}
-                    >
-                        <AppIcon name="logout" size={19} color="#ffffff" />
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <NotificacionesCampana
+                            buttonStyle={styles.iconActionBtn}
+                            onSeleccionar={(notificacion) => onNotificacionSeleccionada?.(notificacion)}
+                        />
+                        <TouchableOpacity
+                            style={styles.iconActionBtn}
+                            onPress={manejarCerrarSesion}
+                            activeOpacity={0.75}
+                        >
+                            <AppIcon name="logout" size={19} color="#ffffff" />
+                        </TouchableOpacity>
+                    </View>
                 </View>
 
                 <Image
@@ -511,7 +523,7 @@ export const GestionRolesScreen = ({
                 />
             </View>
 
-            {/* ENCABEZADO DE SECCIÓN + 3 TARJETAS KPI + BUSCADOR */}
+                {/* ENCABEZADO DE SECCIÓN + FILTROS POR ROL + BUSCADOR */}
             <View style={[styles.topSummarySection, esEscritorio && { width: '100%', maxWidth: 912, alignSelf: 'center' }]}>
                 <View style={styles.sectionBannerRow}>
                     <View style={styles.blueCircleIcon}>
@@ -527,24 +539,29 @@ export const GestionRolesScreen = ({
                     </View>
                 </View>
 
-                {/* 4 Tarjetas KPI */}
-                <View style={styles.kpiRow}>
-                    <View style={styles.kpiCard}>
-                        <Text style={[styles.kpiNumber, { color: '#16a34a' }]}>{totalUsuarios}</Text>
-                        <Text style={styles.kpiLabel}>Usuarios</Text>
-                    </View>
-                    <View style={styles.kpiCard}>
-                        <Text style={[styles.kpiNumber, { color: '#1d4ed8' }]}>{totalOperadores}</Text>
-                        <Text style={styles.kpiLabel}>Operadores</Text>
-                    </View>
-                    <View style={styles.kpiCard}>
-                        <Text style={[styles.kpiNumber, { color: '#6d28d9' }]}>{totalTecnicos}</Text>
-                        <Text style={styles.kpiLabel}>Técnicos</Text>
-                    </View>
-                    <View style={styles.kpiCard}>
-                        <Text style={[styles.kpiNumber, { color: '#b45309' }]}>{totalAdmins}</Text>
-                        <Text style={styles.kpiLabel}>Admins</Text>
-                    </View>
+                {/* Filtros de personal por rol */}
+                <View style={[styles.kpiRow, width < 520 && styles.kpiRowMobile]}>
+                    {([
+                        { rol: 'USUARIO', etiqueta: 'Usuarios', valor: totalUsuarios, color: '#16a34a' },
+                        { rol: 'OPERADOR', etiqueta: 'Operadores', valor: totalOperadores, color: '#1d4ed8' },
+                        { rol: 'TECNICO', etiqueta: 'Técnicos', valor: totalTecnicos, color: '#6d28d9' },
+                        { rol: 'ADMINISTRADOR', etiqueta: 'Admins', valor: totalAdmins, color: '#b45309' },
+                    ] as const).map((item) => (
+                        <TouchableOpacity
+                            key={item.rol}
+                            style={[styles.kpiCard, width < 520 && styles.kpiCardMobile, filtroRol === item.rol && styles.kpiCardActive]}
+                            onPress={() => {
+                                setTabActivo('TODOS');
+                                setFiltroRol((actual) => actual === item.rol ? null : item.rol);
+                            }}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: filtroRol === item.rol }}
+                            activeOpacity={0.78}
+                        >
+                            <Text style={[styles.kpiNumber, width < 390 && styles.kpiNumberCompact, { color: item.color }]}>{item.valor}</Text>
+                            <Text style={[styles.kpiLabel, width < 390 && styles.kpiLabelCompact]}>{item.etiqueta}</Text>
+                        </TouchableOpacity>
+                    ))}
                 </View>
 
                 {/* Buscador en forma de píldora */}
@@ -644,7 +661,7 @@ export const GestionRolesScreen = ({
                             styles.bottomNavTab,
                             tabActivo === 'ASIGNADOS' && styles.bottomNavTabActive,
                         ]}
-                        onPress={() => setTabActivo('ASIGNADOS')}
+                        onPress={() => { setTabActivo('ASIGNADOS'); setFiltroRol(null); }}
                         activeOpacity={0.8}
                     >
                         <AppIcon
@@ -668,7 +685,7 @@ export const GestionRolesScreen = ({
                             styles.bottomNavTab,
                             tabActivo === 'TODOS' && styles.bottomNavTabActive,
                         ]}
-                        onPress={() => setTabActivo('TODOS')}
+                        onPress={() => { setTabActivo('TODOS'); setFiltroRol(null); }}
                         activeOpacity={0.8}
                     >
                         <AppIcon
@@ -879,6 +896,7 @@ export const GestionRolesScreen = ({
                 visible={menuLateralVisible}
                 onClose={() => setMenuLateralVisible(false)}
                 rolesDisponibles={rolesDisponibles}
+                nombreUsuario={nombreUsuario}
                 rolActivo={rolActivo}
                 onSelectRol={(nuevoRol) => {
                     if (onCambiarRol) onCambiarRol(nuevoRol);
@@ -974,6 +992,10 @@ const styles = StyleSheet.create({
         gap: 10,
         marginBottom: 12,
     },
+    kpiRowMobile: {
+        flexWrap: 'nowrap',
+        gap: 5,
+    },
     kpiCard: {
         flex: 1,
         backgroundColor: '#ffffff',
@@ -990,10 +1012,22 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.05,
         shadowRadius: 4,
     },
+    kpiCardMobile: {
+        flexBasis: 0,
+        paddingHorizontal: 2,
+    },
+    kpiCardActive: {
+        backgroundColor: '#eff6ff',
+        borderColor: '#1d68d8',
+        borderWidth: 2,
+    },
     kpiNumber: {
         fontSize: 19,
         fontWeight: 'bold',
         color: '#0f4c9c',
+    },
+    kpiNumberCompact: {
+        fontSize: 17,
     },
     kpiLabel: {
         fontSize: 11,
@@ -1001,6 +1035,9 @@ const styles = StyleSheet.create({
         marginTop: 2,
         textAlign: 'center',
         fontWeight: '500',
+    },
+    kpiLabelCompact: {
+        fontSize: 9,
     },
     searchPillWrapper: {
         flexDirection: 'row',

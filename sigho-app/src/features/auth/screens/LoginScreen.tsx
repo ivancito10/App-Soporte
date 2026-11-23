@@ -18,8 +18,10 @@ import { guardarItem, obtenerItem, eliminarItem } from '../../../core/utils/stor
 import { login } from '../api/auth.service';
 import { registrarParaNotificacionesPush } from '../../../core/utils/notifications';
 import { vincularTokenFCM } from '../api/auth.service';
+import * as LocalAuthentication from 'expo-local-authentication';
 
 const STORAGE_KEY_CREDENCIALES = 'soporte_credenciales_recordadas';
+const STORAGE_KEY_LOGIN_BIOMETRICO = 'soporte_login_biometrico';
 
 // 1. Icono de Usuario con círculo (izquierda del campo Usuario)
 const IconoUsuarioInput = () => {
@@ -142,6 +144,9 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
     const [mostrarContrasena, setMostrarContrasena] = useState(false);
     const [recordarContrasena, setRecordarContrasena] = useState(false);
     const [cargando, setCargando] = useState(false);
+    const [biometriaDisponible, setBiometriaDisponible] = useState(false);
+    const [usarBiometria, setUsarBiometria] = useState(false);
+    const [biometriaActiva, setBiometriaActiva] = useState(false);
 
     const { height } = useWindowDimensions();
     // En celular queda ~230px; en tablet crece proporcionalmente hasta 320px
@@ -150,6 +155,16 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
     useEffect(() => {
         const cargarCredencialesRecordadas = async () => {
             try {
+                if (Platform.OS !== 'web') {
+                    const [tieneHardware, tieneBiometria, biometriaGuardada] = await Promise.all([
+                        LocalAuthentication.hasHardwareAsync(),
+                        LocalAuthentication.isEnrolledAsync(),
+                        obtenerItem(STORAGE_KEY_LOGIN_BIOMETRICO),
+                    ]);
+                    setBiometriaDisponible(tieneHardware && tieneBiometria);
+                    setBiometriaActiva(biometriaGuardada === 'true' && tieneHardware && tieneBiometria);
+                    setUsarBiometria(biometriaGuardada === 'true' && tieneHardware && tieneBiometria);
+                }
                 const guardadasStr = await obtenerItem(STORAGE_KEY_CREDENCIALES);
                 if (guardadasStr) {
                     const parsed = JSON.parse(guardadasStr);
@@ -177,13 +192,20 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
             await login(usuario, contrasena);
 
             try {
-                if (recordarContrasena) {
+                if (recordarContrasena || usarBiometria) {
                     await guardarItem(
                         STORAGE_KEY_CREDENCIALES,
                         JSON.stringify({ usuario, contrasena })
                     );
                 } else {
                     await eliminarItem(STORAGE_KEY_CREDENCIALES);
+                }
+                if (usarBiometria) {
+                    await guardarItem(STORAGE_KEY_LOGIN_BIOMETRICO, 'true');
+                    setBiometriaActiva(true);
+                } else {
+                    await eliminarItem(STORAGE_KEY_LOGIN_BIOMETRICO);
+                    setBiometriaActiva(false);
                 }
             } catch (errCred) {
                 console.log('No se pudo actualizar credenciales recordadas:', errCred);
@@ -212,6 +234,40 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
             } else {
                 Alert.alert('Error al ingresar', textoFinal);
             }
+        } finally {
+            setCargando(false);
+        }
+    };
+
+    const handleBiometricLogin = async () => {
+        if (Platform.OS === 'web' || cargando) return;
+        setCargando(true);
+        try {
+            const credencialesStr = await obtenerItem(STORAGE_KEY_CREDENCIALES);
+            const credenciales = credencialesStr ? JSON.parse(credencialesStr) : null;
+            if (!credenciales?.usuario || !credenciales?.contrasena) {
+                throw new Error('No hay credenciales guardadas. Ingresa con tu contraseña y activa el acceso biométrico.');
+            }
+
+            const resultado = await LocalAuthentication.authenticateAsync({
+                promptMessage: 'Confirma tu identidad para ingresar',
+                cancelLabel: 'Cancelar',
+                fallbackLabel: 'Usar contraseña',
+                biometricsSecurityLevel: 'strong',
+            });
+            if (!resultado.success) return;
+
+            await login(credenciales.usuario, credenciales.contrasena);
+            try {
+                const tokenFCM = await registrarParaNotificacionesPush();
+                if (tokenFCM) await vincularTokenFCM(tokenFCM).catch((e) => console.log('Error vinculando token FCM', e));
+            } catch (notifError) {
+                console.warn('Notificaciones omitidas en este entorno:', notifError);
+            }
+            onLogin();
+        } catch (error: any) {
+            const mensaje = error?.response?.data?.message || error?.message || 'No se pudo ingresar con biometría.';
+            Alert.alert('Ingreso biométrico', Array.isArray(mensaje) ? mensaje.join('\n') : mensaje);
         } finally {
             setCargando(false);
         }
@@ -323,6 +379,19 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
                                 </TouchableOpacity>
 
                                 {/* CHECKBOX "Recordarme" DEBAJO DEL BOTÓN */}
+                                {Platform.OS !== 'web' && biometriaActiva && usarBiometria && (
+                                    <TouchableOpacity
+                                        style={styles.biometricButton}
+                                        onPress={handleBiometricLogin}
+                                        disabled={cargando}
+                                        activeOpacity={0.8}
+                                    >
+                                        {cargando ? <ActivityIndicator color="#1d5bbf" /> : (
+                                            <Text style={styles.biometricButtonText}>◉  INGRESAR CON HUELLA / BIOMETRÍA</Text>
+                                        )}
+                                    </TouchableOpacity>
+                                )}
+
                                 <TouchableOpacity
                                     style={styles.rememberRow}
                                     onPress={() => setRecordarContrasena((prev) => !prev)}
@@ -333,6 +402,28 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
                                     </View>
                                     <Text style={styles.rememberText}>Recordarme</Text>
                                 </TouchableOpacity>
+
+                                {Platform.OS !== 'web' && biometriaDisponible && (
+                                    <TouchableOpacity
+                                        style={[styles.rememberRow, { marginTop: 4 }]}
+                                        onPress={() => {
+                                            const activar = !usarBiometria;
+                                            setUsarBiometria(activar);
+                                            if (!activar) {
+                                                setBiometriaActiva(false);
+                                                void eliminarItem(STORAGE_KEY_LOGIN_BIOMETRICO);
+                                            }
+                                        }}
+                                        activeOpacity={0.7}
+                                    >
+                                        <View style={[styles.checkbox, usarBiometria && styles.checkboxChecked]}>
+                                            {usarBiometria && <Text style={styles.checkboxMark}>✓</Text>}
+                                        </View>
+                                        <Text style={styles.rememberText}>
+                                            {Platform.OS === 'ios' ? 'Activar Face ID / Touch ID' : 'Activar ingreso con huella'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                )}
                             </View>
                         </View>
                     </View>
@@ -517,6 +608,22 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         fontSize: 14.5,
         letterSpacing: 0.6,
+    },
+    biometricButton: {
+        backgroundColor: '#eff6ff',
+        borderColor: '#bfdbfe',
+        borderWidth: 1,
+        height: 46,
+        borderRadius: 24,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginTop: 10,
+    },
+    biometricButtonText: {
+        color: '#1d4ed8',
+        fontWeight: '700',
+        fontSize: 12,
+        letterSpacing: 0.2,
     },
 
     // CHECKBOX RECORDARME

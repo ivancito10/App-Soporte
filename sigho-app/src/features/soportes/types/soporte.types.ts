@@ -40,10 +40,14 @@ export interface TicketSoporte {
     id_asignacion?: number; // Viene en la bandeja de técnico/administrador
     fecha_solicitud?: string;
     fecha_asignacion?: string;
+    fecha_primera_asignacion?: string;
+    segundos_hasta_asignacion?: number | null;
     piso: string;
     oficina: string;
     consultorio?: string;
     estado: string;
+    es_manual?: boolean;
+    solicitante_manual?: string | null;
     nombre_usuario?: string;
     username?: string;
 
@@ -61,6 +65,12 @@ export interface TicketSoporte {
     prioridad?: string;
     fecha_inicio?: string;
     fecha_finalizacion?: string;
+    fecha_en_camino?: string | null;
+    latitud_en_camino?: number | null;
+    longitud_en_camino?: number | null;
+    fecha_llegada?: string | null;
+    latitud_llegada?: number | null;
+    longitud_llegada?: number | null;
     segundos_desde_asignacion?: number;
     segundos_desde_inicio?: number;
     tiempo_resolucion?: string;
@@ -69,5 +79,7 @@ export interface TicketSoporte {
     nombre_archivo_acta?: string;
     tipo_mime_acta?: string;
     nombre_tecnico?: string;
+    calificacion_usuario?: 'MUY_BIEN' | 'BIEN' | 'MAL' | null;
+    fecha_calificacion_usuario?: string | null;
     ultima_reasignacion_motivo?: string;
 }

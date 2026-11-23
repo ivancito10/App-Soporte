@@ -6,7 +6,7 @@ import { View, ActivityIndicator, Platform } from 'react-native';
 import { theme } from '../theme/theme';
 import { LoginScreen } from '../../features/auth/screens/LoginScreen';
 import { vincularTokenFCM } from '../../features/auth/api/auth.service';
-import { registrarParaNotificacionesPush } from '../utils/notifications';
+import { escucharAperturaNotificacion, registrarParaNotificacionesPush } from '../utils/notifications';
 import { BandejaScreen } from '../../features/soportes/screens/BandejaScreen';
 import { TicketDetalleScreen } from '../../features/soportes/screens/TicketDetalleScreen';
 import { CrearSolicitudScreen } from '../../features/soportes/screens/CrearSolicitudScreen';
@@ -21,6 +21,7 @@ export const AppNavigator = () => {
     const [autenticado, setAutenticado] = useState(false);
     const [rolActivo, setRolActivo] = useState<string | null>(null);
     const [rolesDisponibles, setRolesDisponibles] = useState<string[]>([]);
+    const [solicitudDesdeNotificacion, setSolicitudDesdeNotificacion] = useState<number | null>(null);
     const escudosHistorialRef = useRef<number>(0);
 
     // Esta función la llamamos tanto al inicio como justo después del login o al pulsar "Verificar acceso"
@@ -99,6 +100,19 @@ export const AppNavigator = () => {
     useEffect(() => {
         verificarSesion();
     }, []);
+
+    useEffect(() => escucharAperturaNotificacion((datos) => {
+        if (datos.tipoNotificacion !== 'ASIGNACION_TECNICO') return;
+        const idSolicitud = Number(datos.idSolicitud);
+        if (Number.isFinite(idSolicitud) && idSolicitud > 0) {
+            setSolicitudDesdeNotificacion(idSolicitud);
+        }
+    }), []);
+
+    useEffect(() => {
+        if (!autenticado || !solicitudDesdeNotificacion || !rolesDisponibles.includes('TECNICO')) return;
+        if (rolActivo !== 'TECNICO') void cambiarRol('TECNICO');
+    }, [autenticado, solicitudDesdeNotificacion, rolesDisponibles, rolActivo, cambiarRol]);
 
     // Bloquear el botón "Atrás" propio del navegador web en TODOS los roles.
     // NOTA: Chrome ignora history.pushState si no ocurre dentro de un clic/gesto real del usuario
@@ -192,6 +206,13 @@ export const AppNavigator = () => {
                                         rolesDisponibles={rolesDisponibles}
                                         onCambiarRol={cambiarRol}
                                         onRolesActualizados={setRolesDisponibles}
+                                        onNotificacionSeleccionada={(notificacion: any) => {
+                                            if (notificacion?.datos?.tipoNotificacion !== 'ASIGNACION_TECNICO') return;
+                                            const idSolicitud = Number(notificacion?.datos?.idSolicitud);
+                                            if (Number.isFinite(idSolicitud) && idSolicitud > 0 && rolesDisponibles.includes('TECNICO')) {
+                                                setSolicitudDesdeNotificacion(idSolicitud);
+                                            }
+                                        }}
                                         onLogout={() => {
                                             setAutenticado(false);
                                             setRolActivo(null);
@@ -208,6 +229,15 @@ export const AppNavigator = () => {
                                         rolActivo={rolActivo}
                                         rolesDisponibles={rolesDisponibles}
                                         onCambiarRol={cambiarRol}
+                                        solicitudDesdeNotificacion={solicitudDesdeNotificacion}
+                                        onNotificacionAbierta={() => setSolicitudDesdeNotificacion(null)}
+                                        onNotificacionSeleccionada={(notificacion: any) => {
+                                            if (notificacion?.datos?.tipoNotificacion !== 'ASIGNACION_TECNICO') return;
+                                            const idSolicitud = Number(notificacion?.datos?.idSolicitud);
+                                            if (Number.isFinite(idSolicitud) && idSolicitud > 0 && rolesDisponibles.includes('TECNICO')) {
+                                                setSolicitudDesdeNotificacion(idSolicitud);
+                                            }
+                                        }}
                                         onLogout={() => {
                                             setAutenticado(false);
                                             setRolActivo(null);

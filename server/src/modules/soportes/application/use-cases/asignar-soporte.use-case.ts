@@ -22,8 +22,13 @@ export class AsignarSoporteUseCase {
         await this.notificationService.enviarNotificacion(
           idSoporte,
           'Nuevo Ticket Asignado',
-          `Tienes un nuevo ticket asignado por el operador #${idOperador}.`,
-          { idAsignacion: String(asignacion.idAsignacion ?? asignacion.id ?? '') }
+          `Te asignaron el ticket #${asignacion.idSolicitud ?? dto.idSolicitud}. Cambia al modo TÉCNICO para atenderlo.`,
+          {
+            idAsignacion: String(asignacion.idAsignacion ?? asignacion.id ?? ''),
+            idSolicitud: String(asignacion.idSolicitud ?? dto.idSolicitud ?? ''),
+            rolDestino: 'TECNICO',
+            tipoNotificacion: 'ASIGNACION_TECNICO',
+          }
         );
       }
     } catch (error) {

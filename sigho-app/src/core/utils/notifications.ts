@@ -7,13 +7,15 @@ const Notifications = Platform.OS !== 'web' ? require('expo-notifications') : nu
 // Esto le dice a la app qué hacer si recibe una notificación MIENTRAS el usuario la está usando (solo móvil)
 if (Platform.OS !== 'web' && Notifications) {
     Notifications.setNotificationHandler({
-        handleNotification: async () => ({
-            shouldShowAlert: true,
-            shouldPlaySound: true,
-            shouldSetBadge: false,
-            shouldShowBanner: true,
-            shouldShowList: true,
-        }),
+        handleNotification: async (notification: any) => {
+            return {
+                shouldShowAlert: true,
+                shouldPlaySound: true,
+                shouldSetBadge: false,
+                shouldShowBanner: true,
+                shouldShowList: true,
+            };
+        },
     });
 }
 
@@ -67,6 +69,43 @@ export async function registrarParaNotificacionesPush(): Promise<string | undefi
 
     return token;
 }
+
+/** Escucha la apertura de avisos de asignación, incluso al iniciar la app desde una notificación. */
+export function escucharAperturaNotificacion(callback: (datos: Record<string, unknown>) => void) {
+    if (Platform.OS === 'web' || !Notifications) return () => {};
+
+    let ultimaRespuesta = '';
+    const procesarRespuesta = (respuesta: any) => {
+        if (!respuesta) return;
+        const datos = respuesta.notification?.request?.content?.data;
+        if (!datos || !datos.idSolicitud) return;
+        const clave = `${respuesta.notification.request.identifier}:${respuesta.actionIdentifier}`;
+        if (clave === ultimaRespuesta) return;
+        ultimaRespuesta = clave;
+        callback(datos);
+        Notifications.clearLastNotificationResponseAsync?.().catch(() => {});
+    };
+
+    const suscripcion = Notifications.addNotificationResponseReceivedListener(procesarRespuesta);
+    Notifications.getLastNotificationResponseAsync?.().then(procesarRespuesta).catch(() => {});
+    return () => suscripcion.remove();
+}
+
+/** Permite mostrar dentro de la app los avisos que llegan mientras está abierta, en cualquier rol. */
+export function escucharNotificacionRecibida(callback: (notificacion: { titulo: string; cuerpo: string; datos: Record<string, unknown> }) => void) {
+    if (Platform.OS === 'web' || !Notifications) return () => {};
+
+    const suscripcion = Notifications.addNotificationReceivedListener((notificacion: any) => {
+        const contenido = notificacion.request?.content;
+        callback({
+            titulo: String(contenido?.title || 'Nueva notificación'),
+            cuerpo: String(contenido?.body || ''),
+            datos: contenido?.data || {},
+        });
+    });
+    return () => suscripcion.remove();
+}
+
 export const registrarCanalNotificaciones = async () => {
     if (Platform.OS === 'android') {
         try {

@@ -18,6 +18,54 @@ export const obtenerBandeja = async (params: any) => {
     return response.data;
 };
 
+export type CalificacionTecnico = 'MUY_BIEN' | 'BIEN' | 'MAL';
+
+export const obtenerCalificacionSoporte = async (idSolicitud: number) => {
+    const response = await api.get(`/soportes/solicitud/${idSolicitud}/calificacion`);
+    return response.data?.data || null;
+};
+
+export const calificarTecnicoSoporte = async (idSolicitud: number, calificacion: CalificacionTecnico) => {
+    const response = await api.post(`/soportes/solicitud/${idSolicitud}/calificacion`, { calificacion });
+    return response.data?.data || null;
+};
+
+export interface CrearSoporteManualPayload {
+    solicitante_nombre: string;
+    oficina: string;
+    piso?: string;
+    consultorio?: string;
+    descripcion: string;
+    prioridad: 'BAJA' | 'MEDIA' | 'ALTA';
+}
+
+export const crearSoporteManual = async (payload: CrearSoporteManualPayload) => {
+    const response = await api.post('/soportes/manual', payload);
+    return response.data?.data;
+};
+
+export interface NotificacionSoporte {
+    id: number;
+    titulo: string;
+    mensaje: string;
+    datos: Record<string, string>;
+    leida: boolean;
+    creado_en: string;
+}
+
+export const obtenerNotificaciones = async (): Promise<NotificacionSoporte[]> => {
+    const response = await api.get('/soportes/notificaciones');
+    return Array.isArray(response.data?.data) ? response.data.data : [];
+};
+
+export const marcarNotificacionLeida = async (id: number) => {
+    await api.patch(`/soportes/notificaciones/${id}/leida`);
+};
+
+export const marcarTodasNotificacionesLeidas = async () => {
+    await api.patch('/soportes/notificaciones/leidas');
+};
+
 // 3. Re-solicitar o Insistir (Usuario)
 export const resolicitarSoporte = async (idSolicitud: number, motivo?: string) => {
     const textoMotivo = motivo?.trim() || 'El usuario solicita atención inmediata';
@@ -31,7 +79,7 @@ export const resolicitarSoporte = async (idSolicitud: number, motivo?: string) =
 };
 
 // 4. Asignar técnico (Operador) con nivel de prioridad
-export const asignarSoporte = async (idSolicitud: number, idTecnico: number, prioridad: string = 'NORMAL') => {
+export const asignarSoporte = async (idSolicitud: number, idTecnico: number, prioridad: string = 'MEDIA') => {
     const response = await api.post('/soportes/asignar', { idSolicitud, idTecnico, prioridad });
     return response.data;
 };
@@ -132,6 +180,16 @@ export const obtenerTecnicos = async () => {
 export const ponerEnProcesoSoporte = async (idSolicitud: number) => {
     const response = await api.post(`/soportes/solicitud/${idSolicitud}/en-proceso`);
     return response.data;
+};
+
+export const registrarTecnicoEnCamino = async (idAsignacion: number, latitud: number, longitud: number) => {
+    const response = await api.post(`/soportes/asignacion/${idAsignacion}/en-camino`, { latitud, longitud });
+    return response.data?.data || response.data?.datos || response.data;
+};
+
+export const registrarLlegadaTecnico = async (idAsignacion: number, latitud: number, longitud: number) => {
+    const response = await api.post(`/soportes/asignacion/${idAsignacion}/llegada`, { latitud, longitud });
+    return response.data?.data || response.data?.datos || response.data;
 };
 
 // 7. Operador reasigna el ticket a otro técnico con justificación y prioridad

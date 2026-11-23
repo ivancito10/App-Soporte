@@ -29,6 +29,24 @@ export class SoporteAsignacionTypeOrmEntity {
   @Column({ type: 'text', nullable: true })
   observacion: string | null;
 
-  @Column({ type: 'varchar', length: 30, nullable: true, default: 'NORMAL' })
+  @Column({ type: 'varchar', length: 30, nullable: true, default: 'MEDIA' })
   prioridad: string | null;
+
+  @Column({ name: 'fecha_en_camino', type: 'timestamp', nullable: true })
+  fechaEnCamino: Date | null;
+
+  @Column({ name: 'latitud_en_camino', type: 'double precision', nullable: true })
+  latitudEnCamino: number | null;
+
+  @Column({ name: 'longitud_en_camino', type: 'double precision', nullable: true })
+  longitudEnCamino: number | null;
+
+  @Column({ name: 'fecha_llegada', type: 'timestamp', nullable: true })
+  fechaLlegada: Date | null;
+
+  @Column({ name: 'latitud_llegada', type: 'double precision', nullable: true })
+  latitudLlegada: number | null;
+
+  @Column({ name: 'longitud_llegada', type: 'double precision', nullable: true })
+  longitudLlegada: number | null;
 }
