@@ -220,22 +220,25 @@ export class SoportesController {
         ? String(response.piso).trim()
         : `Piso ${String(response.piso).trim()}`
       : '';
-    const ubicacion = [response.oficina, pisoFormateado].filter(Boolean).join(' ') || `Ticket #${idSolicitud}`;
+    const ubicacion = [response.oficina, pisoFormateado].filter(Boolean).join(' ') || `Ticket ${response.codigoTicket || `#${idSolicitud}`}`;
 
     const mensajeAlerta = `⚠️ Insistencia: El usuario de ${ubicacion} requiere atención demorada`;
 
-    // 3. Disparamos la notificación Push hacia los celulares de los Operadores y del Técnico asignado
-    if (response.tokensDestino && response.tokensDestino.length > 0) {
+    // 3. Disparamos la notificación Push + Campanita hacia los Operadores y el Técnico asignado
+    const destino = response.idsDestino?.length ? response.idsDestino : response.tokensDestino;
+    if (destino && destino.length > 0) {
       this.notificationService
         .enviarNotificacion(
-          response.tokensDestino,
-          `⚠️ Insistencia - Ticket #${idSolicitud}`,
+          destino,
+          `⚠️ Insistencia - Ticket ${response.codigoTicket || `#${idSolicitud}`}`,
           mensajeAlerta,
           {
             idSolicitud: idSolicitud.toString(),
+            codigoTicket: String(response.codigoTicket || ''),
             oficina: String(response.oficina || ''),
             piso: String(response.piso || ''),
             motivo: String(response.motivo || ''),
+            tipoNotificacion: 'INSISTENCIA_SOPORTE',
           },
         )
         .catch((e: any) => console.log('Fallo notificación push en insistencia:', e));
@@ -384,7 +387,7 @@ export class SoportesController {
   @Post('solicitud/:id/reasignar-operador')
   async reasignarPorOperador(
     @Param('id', ParseIntPipe) idSolicitud: number,
-    @Body() body: { idTecnico: number; justificacion: string; prioridad?: string },
+    @Body() body: { idTecnico: number; justificacion: string; prioridad?: string; instruccionesTecnico?: string },
     @Req() req: any
   ) {
     if (!body.idTecnico || !body.justificacion?.trim()) {
@@ -396,17 +399,19 @@ export class SoportesController {
       Number(body.idTecnico),
       body.justificacion.trim(),
       body.prioridad,
-      Number(req.user?.id)
+      Number(req.user?.id),
+      body.instruccionesTecnico
     );
 
     try {
       await this.notificationService.enviarNotificacion(
         Number(body.idTecnico),
         'Soporte reasignado',
-        `Te asignaron el ticket #${idSolicitud}. Cambia al modo TÉCNICO para atenderlo.`,
+        `Te asignaron el ticket ${resultado?.codigoTicket || `#${idSolicitud}`}. Cambia al modo TÉCNICO para atenderlo.`,
         {
           idAsignacion: String(resultado?.idAsignacion ?? ''),
           idSolicitud: String(idSolicitud),
+          codigoTicket: String(resultado?.codigoTicket ?? ''),
           rolDestino: 'TECNICO',
           tipoNotificacion: 'ASIGNACION_TECNICO',
         },

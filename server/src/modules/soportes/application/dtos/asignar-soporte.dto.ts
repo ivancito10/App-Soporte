@@ -28,5 +28,9 @@ export class AsignarSoporteDto {
 
   @IsOptional()
   @IsString()
+  instruccionesTecnico?: string;
+
+  @IsOptional()
+  @IsString()
   prioridad?: string;
 }

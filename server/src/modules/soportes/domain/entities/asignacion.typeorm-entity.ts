@@ -29,6 +29,9 @@ export class SoporteAsignacionTypeOrmEntity {
   @Column({ type: 'text', nullable: true })
   observacion: string | null;
 
+  @Column({ name: 'instrucciones_tecnico', type: 'text', nullable: true })
+  instruccionesTecnico: string | null;
+
   @Column({ type: 'varchar', length: 30, nullable: true, default: 'MEDIA' })
   prioridad: string | null;
 

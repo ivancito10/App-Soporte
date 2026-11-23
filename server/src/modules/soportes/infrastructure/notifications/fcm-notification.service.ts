@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 // 1. IMPORTACIONES ACTUALIZADAS PARA FIREBASE ADMIN v12+
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getMessaging, MulticastMessage } from 'firebase-admin/messaging';
@@ -41,7 +41,7 @@ export class FcmNotificationService implements NotificationServicePort {
    * Acepta un token FCM directo (string), un arreglo de tokens (string[]) o un id_usuario (number).
    */
   async enviarNotificacion(
-    destino: number | string | string[],
+    destino: number | number[] | string | string[],
     titulo: string,
     mensaje: string,
     dataPayload?: Record<string, string>,
@@ -52,7 +52,25 @@ export class FcmNotificationService implements NotificationServicePort {
       if (typeof destino === 'string') {
         deviceTokens = [destino.trim()].filter(Boolean);
       } else if (Array.isArray(destino)) {
-        deviceTokens = Array.from(new Set(destino.map((t) => t?.trim()).filter(Boolean)));
+        const idsNumericos = Array.from(
+          new Set(
+            destino
+              .filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0)
+          )
+        );
+        if (idsNumericos.length > 0) {
+          await Promise.all(
+            idsNumericos.map((idUsr) => this.registrarNotificacion(idUsr, titulo, mensaje, dataPayload)),
+          );
+          const tokens = await this.tokenRepo.find({
+            where: { idUsuario: In(idsNumericos) },
+          });
+          deviceTokens = Array.from(new Set(tokens.map((t) => t.tokenDispositivo).filter(Boolean)));
+        } else {
+          deviceTokens = Array.from(
+            new Set(destino.map((t) => String(t || '').trim()).filter(Boolean))
+          );
+        }
       } else if (typeof destino === 'number') {
         await this.registrarNotificacion(destino, titulo, mensaje, dataPayload);
         const tokens = await this.tokenRepo.find({
@@ -109,6 +127,7 @@ export class FcmNotificationService implements NotificationServicePort {
       `SELECT id, titulo, mensaje, datos, leida, creado_en
        FROM administracion.soporte_notificaciones
        WHERE id_usuario = $1
+         AND leida = false
        ORDER BY creado_en DESC
        LIMIT 50`,
       [idUsuario],

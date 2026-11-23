@@ -63,6 +63,14 @@ export const BandejaScreen = ({ navigation, onLogout, rolActivo, rolesDisponible
     const primeraCargaRef = useRef<boolean>(true);
     const solicitudNotificacionProcesadaRef = useRef<number | null>(null);
 
+    useEffect(() => {
+        if (!alertaEmergente) return;
+        const timer = setTimeout(() => {
+            setAlertaEmergente(null);
+        }, 5000);
+        return () => clearTimeout(timer);
+    }, [alertaEmergente]);
+
     const manejarCerrarSesion = async () => {
         await eliminarItem('jwtToken');
         await eliminarItem('userData');
@@ -110,7 +118,7 @@ export const BandejaScreen = ({ navigation, onLogout, rolActivo, rolesDisponible
                         if (!primeraCargaRef.current && cantActual > cantPrevia && t.estado !== 'FINALIZADA') {
                             const msg = `⚠️ Insistencia: El usuario de ${t.oficina} ${t.piso ? `(${t.piso})` : ''} requiere atención demorada`;
                             setAlertaEmergente({ ticket: t, mensaje: msg });
-                            dispararAlertaInsistenciaDispositivo(`🔔 Ticket #${idT} Re-solicitado`, msg);
+                            dispararAlertaInsistenciaDispositivo(`🔔 Ticket ${t.codigo_ticket || `#${idT}`} Re-solicitado`, msg);
                         }
                         mapaInsistenciasRef.current[idT] = cantActual;
                     });
@@ -252,13 +260,17 @@ export const BandejaScreen = ({ navigation, onLogout, rolActivo, rolesDisponible
             solicitudNotificacionProcesadaRef.current = null;
             return;
         }
-        if (rolUsuario !== RolBandeja.TECNICO || solicitudNotificacionProcesadaRef.current === Number(solicitudDesdeNotificacion)) return;
-        const ticketAsignado = tickets.find((ticket) => Number(ticket.id_solicitud || ticket.id) === Number(solicitudDesdeNotificacion));
-        if (!ticketAsignado) return;
-        solicitudNotificacionProcesadaRef.current = Number(solicitudDesdeNotificacion);
-        navigation.navigate('TicketDetalle', { ticket: ticketAsignado, rolUsuario: RolBandeja.TECNICO });
+        const idObjetivo = Number(solicitudDesdeNotificacion);
+        if (solicitudNotificacionProcesadaRef.current === idObjetivo) return;
+        const listaCombinada = [...tickets, ...ticketsDerivadas];
+        const ticketObjetivo = listaCombinada.find(
+            (ticket) => Number(ticket.id_solicitud || ticket.id) === idObjetivo
+        );
+        if (!ticketObjetivo) return;
+        solicitudNotificacionProcesadaRef.current = idObjetivo;
+        navigation.navigate('TicketDetalle', { ticket: ticketObjetivo, rolUsuario });
         onNotificacionAbierta?.();
-    }, [solicitudDesdeNotificacion, rolUsuario, tickets, navigation, onNotificacionAbierta]);
+    }, [solicitudDesdeNotificacion, rolUsuario, tickets, ticketsDerivadas, navigation, onNotificacionAbierta]);
 
     const renderCabecera = () => (
         <View style={styles.topHeader}>
@@ -306,7 +318,7 @@ export const BandejaScreen = ({ navigation, onLogout, rolActivo, rolesDisponible
                             const id = Number(ticket.id_solicitud || ticket.id);
                             return {
                                 id,
-                                titulo: `Ticket #${id} — ${ticket.oficina || 'Soporte'}`,
+                                titulo: `Ticket ${ticket.codigo_ticket || `#${id}`} — ${ticket.oficina || 'Soporte'}`,
                                 mensaje: `El usuario requiere atención (${ticket.cantidad_resolicitudes} insistencia(s)).`,
                                 detalle: ticket.ultima_resolicitud_motivo ? `Motivo: ${ticket.ultima_resolicitud_motivo}` : undefined,
                             };
@@ -442,7 +454,7 @@ export const BandejaScreen = ({ navigation, onLogout, rolActivo, rolesDisponible
                         }}
                     >
                         <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>
-                            🔔 Nueva Notificación de Insistencia (Ticket #{alertaEmergente.ticket.id_solicitud || alertaEmergente.ticket.id})
+                            🔔 Nueva Notificación de Insistencia (Ticket {alertaEmergente.ticket.codigo_ticket || `#${alertaEmergente.ticket.id_solicitud || alertaEmergente.ticket.id}`})
                         </Text>
                         <Text style={{ color: '#eafaf1', fontSize: 13, marginTop: 2 }}>
                             {alertaEmergente.mensaje}

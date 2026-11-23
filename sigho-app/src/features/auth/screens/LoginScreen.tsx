@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     View,
     Text,
@@ -138,19 +138,39 @@ const IconoIngresarBtn = () => {
     );
 };
 
-export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
+export const LoginScreen = ({ onLogin, iniciarConContrasena = false }: { onLogin: () => void; iniciarConContrasena?: boolean }) => {
     const [usuario, setUsuario] = useState('');
     const [contrasena, setContrasena] = useState('');
     const [mostrarContrasena, setMostrarContrasena] = useState(false);
     const [recordarContrasena, setRecordarContrasena] = useState(false);
     const [cargando, setCargando] = useState(false);
+    const [metodoCargando, setMetodoCargando] = useState<'password' | 'biometrico' | null>(null);
     const [biometriaDisponible, setBiometriaDisponible] = useState(false);
     const [usarBiometria, setUsarBiometria] = useState(false);
     const [biometriaActiva, setBiometriaActiva] = useState(false);
+    const [biometriaGuardadaAlIniciar, setBiometriaGuardadaAlIniciar] = useState(false);
+    const [preferenciasCargadas, setPreferenciasCargadas] = useState(false);
+    const [mostrarLoginManual, setMostrarLoginManual] = useState(iniciarConContrasena);
+    const [errorBiometrico, setErrorBiometrico] = useState('');
+    const intentoBiometricoAutomatico = useRef(false);
+    const autenticandoRef = useRef(false);
 
     const { height } = useWindowDimensions();
     // En celular queda ~230px; en tablet crece proporcionalmente hasta 320px
     const heroMinHeight = Math.max(230, Math.min(height * 0.30, 320));
+
+    const registrarPushSinBloquearLogin = () => {
+        void (async () => {
+            try {
+                const tokenFCM = await registrarParaNotificacionesPush();
+                if (tokenFCM) {
+                    await vincularTokenFCM(tokenFCM);
+                }
+            } catch (error) {
+                console.warn('Notificaciones omitidas en este entorno:', error);
+            }
+        })();
+    };
 
     useEffect(() => {
         const cargarCredencialesRecordadas = async () => {
@@ -161,9 +181,11 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
                         LocalAuthentication.isEnrolledAsync(),
                         obtenerItem(STORAGE_KEY_LOGIN_BIOMETRICO),
                     ]);
+                    const biometriaConfigurada = biometriaGuardada === 'true' && tieneHardware && tieneBiometria;
                     setBiometriaDisponible(tieneHardware && tieneBiometria);
-                    setBiometriaActiva(biometriaGuardada === 'true' && tieneHardware && tieneBiometria);
-                    setUsarBiometria(biometriaGuardada === 'true' && tieneHardware && tieneBiometria);
+                    setBiometriaGuardadaAlIniciar(biometriaConfigurada);
+                    setBiometriaActiva(biometriaConfigurada);
+                    setUsarBiometria(biometriaConfigurada);
                 }
                 const guardadasStr = await obtenerItem(STORAGE_KEY_CREDENCIALES);
                 if (guardadasStr) {
@@ -176,6 +198,8 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
                 }
             } catch (e) {
                 console.log('No se pudieron cargar credenciales recordadas:', e);
+            } finally {
+                setPreferenciasCargadas(true);
             }
         };
         cargarCredencialesRecordadas();
@@ -187,6 +211,7 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
             return;
         }
 
+        setMetodoCargando('password');
         setCargando(true);
         try {
             await login(usuario, contrasena);
@@ -211,15 +236,7 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
                 console.log('No se pudo actualizar credenciales recordadas:', errCred);
             }
 
-            try {
-                const tokenFCM = await registrarParaNotificacionesPush();
-                if (tokenFCM) {
-                    await vincularTokenFCM(tokenFCM).catch((e) => console.log('Error vinculando token FCM', e));
-                }
-            } catch (notifError) {
-                console.warn('Notificaciones omitidas en este entorno:', notifError);
-            }
-
+            registrarPushSinBloquearLogin();
             onLogin();
         } catch (error: any) {
             console.error('Error detallado del servidor:', error);
@@ -227,7 +244,9 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
 
             const textoFinal = Array.isArray(mensajeError)
                 ? mensajeError.join('\n')
-                : mensajeError || 'Credenciales incorrectas o error de red';
+                : mensajeError || (error?.code === 'ECONNABORTED'
+                    ? 'El servidor no respondió en 15 segundos. Revisa la conexión e intenta nuevamente.'
+                    : 'Credenciales incorrectas o error de red');
 
             if (Platform.OS === 'web') {
                 window.alert('Error: ' + textoFinal);
@@ -236,13 +255,26 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
             }
         } finally {
             setCargando(false);
+            setMetodoCargando(null);
         }
     };
 
-    const handleBiometricLogin = async () => {
-        if (Platform.OS === 'web' || cargando) return;
+    const handleBiometricLogin = useCallback(async () => {
+        if (Platform.OS === 'web' || autenticandoRef.current) return;
+        autenticandoRef.current = true;
+        setErrorBiometrico('');
+        setMetodoCargando('biometrico');
         setCargando(true);
         try {
+            const compatible = await LocalAuthentication.hasHardwareAsync();
+            const enrollado = await LocalAuthentication.isEnrolledAsync();
+            if (!compatible || !enrollado) {
+                setBiometriaDisponible(false);
+                setUsarBiometria(false);
+                setMostrarLoginManual(true);
+                return;
+            }
+
             const credencialesStr = await obtenerItem(STORAGE_KEY_CREDENCIALES);
             const credenciales = credencialesStr ? JSON.parse(credencialesStr) : null;
             if (!credenciales?.usuario || !credenciales?.contrasena) {
@@ -250,28 +282,54 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
             }
 
             const resultado = await LocalAuthentication.authenticateAsync({
-                promptMessage: 'Confirma tu identidad para ingresar',
+                promptMessage: 'Confirma tu identidad',
                 cancelLabel: 'Cancelar',
-                fallbackLabel: 'Usar contraseña',
-                biometricsSecurityLevel: 'strong',
+                disableDeviceFallback: true,
             });
-            if (!resultado.success) return;
+            if (!resultado.success) {
+                if (resultado.error !== 'user_cancel' && resultado.error !== 'system_cancel' && resultado.error !== 'app_cancel') {
+                    setErrorBiometrico('No se pudo validar la huella. Intenta de nuevo o ingresa con tu contraseña.');
+                }
+                return;
+            }
 
             await login(credenciales.usuario, credenciales.contrasena);
-            try {
-                const tokenFCM = await registrarParaNotificacionesPush();
-                if (tokenFCM) await vincularTokenFCM(tokenFCM).catch((e) => console.log('Error vinculando token FCM', e));
-            } catch (notifError) {
-                console.warn('Notificaciones omitidas en este entorno:', notifError);
-            }
+            registrarPushSinBloquearLogin();
             onLogin();
         } catch (error: any) {
-            const mensaje = error?.response?.data?.message || error?.message || 'No se pudo ingresar con biometría.';
-            Alert.alert('Ingreso biométrico', Array.isArray(mensaje) ? mensaje.join('\n') : mensaje);
+            const mensaje = error?.response?.data?.message || (error?.code === 'ECONNABORTED'
+                ? 'El servidor no respondió en 15 segundos. Revisa la conexión e intenta nuevamente.'
+                : error?.message || 'No se pudo ingresar con biometría.');
+            setErrorBiometrico(Array.isArray(mensaje) ? mensaje.join('\n') : mensaje);
         } finally {
+            autenticandoRef.current = false;
             setCargando(false);
+            setMetodoCargando(null);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        if (
+            Platform.OS !== 'web' && preferenciasCargadas && biometriaGuardadaAlIniciar && biometriaActiva && usarBiometria &&
+            !mostrarLoginManual && !intentoBiometricoAutomatico.current
+        ) {
+            let timerId: ReturnType<typeof setTimeout> | null = null;
+            const rafId = requestAnimationFrame(() => {
+                timerId = setTimeout(() => {
+                    if (!intentoBiometricoAutomatico.current) {
+                        intentoBiometricoAutomatico.current = true;
+                        void handleBiometricLogin();
+                    }
+                }, 450);
+            });
+            return () => {
+                cancelAnimationFrame(rafId);
+                if (timerId) clearTimeout(timerId);
+            };
+        }
+    }, [preferenciasCargadas, biometriaGuardadaAlIniciar, biometriaActiva, usarBiometria, mostrarLoginManual, handleBiometricLogin]);
+
+    const mostrarSoloBiometria = Platform.OS !== 'web' && biometriaGuardadaAlIniciar && biometriaActiva && usarBiometria && !mostrarLoginManual;
 
     return (
         <View style={styles.root}>
@@ -308,6 +366,48 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
                         {/* 2. TARJETA FLOTANTE DE INICIO DE SESIÓN */}
                         <View style={styles.cardWrapper}>
                             <View style={styles.card}>
+                                {mostrarSoloBiometria ? (
+                                    <View style={styles.biometricOnlyPanel}>
+                                        <Text style={styles.cardTitle}>Login biométrico</Text>
+                                        <Text style={styles.cardSubtitle}>
+                                            Confirma tu identidad con la huella o biometría de este dispositivo.
+                                        </Text>
+                                        <TouchableOpacity
+                                            style={styles.fingerprintCircle}
+                                            onPress={handleBiometricLogin}
+                                            disabled={cargando}
+                                            activeOpacity={0.75}
+                                        >
+                                            <Text style={styles.fingerprintMark}>◎</Text>
+                                        </TouchableOpacity>
+                                        <Text style={styles.biometricHint}>
+                                            {cargando ? 'Esperando validación biométrica…' : 'Toca el sensor o vuelve a intentar'}
+                                        </Text>
+                                        {Boolean(errorBiometrico) && (
+                                            <Text style={styles.biometricError}>{errorBiometrico}</Text>
+                                        )}
+                                        <TouchableOpacity
+                                            style={styles.biometricButton}
+                                            onPress={handleBiometricLogin}
+                                            disabled={cargando}
+                                            activeOpacity={0.8}
+                                        >
+                                            {cargando && metodoCargando === 'biometrico' ? <ActivityIndicator color="#1d5bbf" /> : (
+                                                <Text style={styles.biometricButtonText}>VOLVER A INTENTAR</Text>
+                                            )}
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={styles.manualLoginLink}
+                                            onPress={() => {
+                                                setMostrarLoginManual(true);
+                                                setErrorBiometrico('');
+                                            }}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Text style={styles.manualLoginLinkText}>Usar usuario y contraseña</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                ) : <>
                                 <Text style={styles.cardTitle}>Iniciar sesión</Text>
                                 <Text style={styles.cardSubtitle}>
                                     Accede a tu cuenta para gestionar soportes técnicos
@@ -368,7 +468,7 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
                                     disabled={cargando}
                                     activeOpacity={0.85}
                                 >
-                                    {cargando ? (
+                                    {cargando && metodoCargando === 'password' ? (
                                         <ActivityIndicator color="#ffffff" />
                                     ) : (
                                         <View style={styles.loginButtonInner}>
@@ -386,7 +486,7 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
                                         disabled={cargando}
                                         activeOpacity={0.8}
                                     >
-                                        {cargando ? <ActivityIndicator color="#1d5bbf" /> : (
+                                        {cargando && metodoCargando === 'biometrico' ? <ActivityIndicator color="#1d5bbf" /> : (
                                             <Text style={styles.biometricButtonText}>◉  INGRESAR CON HUELLA / BIOMETRÍA</Text>
                                         )}
                                     </TouchableOpacity>
@@ -409,8 +509,11 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
                                         onPress={() => {
                                             const activar = !usarBiometria;
                                             setUsarBiometria(activar);
+                                            setMostrarLoginManual(false);
+                                            setErrorBiometrico('');
                                             if (!activar) {
                                                 setBiometriaActiva(false);
+                                                intentoBiometricoAutomatico.current = false;
                                                 void eliminarItem(STORAGE_KEY_LOGIN_BIOMETRICO);
                                             }
                                         }}
@@ -424,6 +527,7 @@ export const LoginScreen = ({ onLogin }: { onLogin: () => void }) => {
                                         </Text>
                                     </TouchableOpacity>
                                 )}
+                                </>}
                             </View>
                         </View>
                     </View>
@@ -547,6 +651,50 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         marginTop: 4,
         marginBottom: 20,
+    },
+    biometricOnlyPanel: {
+        alignItems: 'center',
+        paddingVertical: 8,
+    },
+    fingerprintCircle: {
+        width: 84,
+        height: 84,
+        borderRadius: 42,
+        borderWidth: 2,
+        borderColor: '#d1fae5',
+        backgroundColor: '#f0fdfa',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginVertical: 18,
+    },
+    fingerprintMark: {
+        color: '#0f8b78',
+        fontSize: 54,
+        lineHeight: 64,
+    },
+    biometricHint: {
+        color: '#64748b',
+        textAlign: 'center',
+        fontSize: 13,
+        marginBottom: 8,
+    },
+    biometricError: {
+        color: '#b42318',
+        textAlign: 'center',
+        fontSize: 12,
+        lineHeight: 18,
+        marginTop: 4,
+        marginBottom: 6,
+    },
+    manualLoginLink: {
+        paddingVertical: 12,
+        paddingHorizontal: 10,
+        marginTop: 4,
+    },
+    manualLoginLinkText: {
+        color: '#1d5bbf',
+        fontWeight: '600',
+        fontSize: 13,
     },
 
     // INPUTS EN FORMA DE PÍLDORA

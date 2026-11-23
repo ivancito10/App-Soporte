@@ -40,6 +40,7 @@ export abstract class SoporteRepositoryPort {
   abstract obtenerBandejaAdministrador(estadoFiltro?: string): Promise<any[]>;
 
   abstract obtenerTokensOperadoresActivos(): Promise<string[]>;
+  abstract obtenerIdsOperadoresActivos(): Promise<number[]>;
 
   // Añade esto junto a las otras funciones que ya tienes
   abstract obtenerItemsDeSolicitud(idSolicitud: number): Promise<any[]>;
@@ -56,7 +57,7 @@ export abstract class SoporteRepositoryPort {
 
   abstract registrarLlegadaTecnico(idAsignacion: number, idSoporte: number, latitud: number, longitud: number): Promise<any>;
 
-  abstract reasignarPorOperador(idSolicitud: number, idNuevoTecnico: number, justificacion: string, prioridad?: string, idOperador?: number): Promise<any>;
+  abstract reasignarPorOperador(idSolicitud: number, idNuevoTecnico: number, justificacion: string, prioridad?: string, idOperador?: number, instruccionesTecnico?: string): Promise<any>;
 
   // GESTIÓN DE ROLES (ADMINISTRADOR)
   abstract esUsuarioAdministrador(idUsuario: number): Promise<boolean>;

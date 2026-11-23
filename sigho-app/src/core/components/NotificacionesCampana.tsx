@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Animated,
     Modal,
+    PanResponder,
     Platform,
     ScrollView,
     StyleSheet,
@@ -28,6 +30,99 @@ const fechaLegible = (valor: string) => {
     const fecha = new Date(valor);
     if (Number.isNaN(fecha.getTime())) return '';
     return fecha.toLocaleString('es-BO', { dateStyle: 'short', timeStyle: 'short' });
+};
+
+interface TarjetaNotificacionProps {
+    item: NotificacionSoporte;
+    onAbrir: (item: NotificacionSoporte) => void;
+    onDescartar: (item: NotificacionSoporte) => void;
+}
+
+const TarjetaNotificacionDeslizable = ({ item, onAbrir, onDescartar }: TarjetaNotificacionProps) => {
+    const translateX = useRef(new Animated.Value(0)).current;
+    const descartadoRef = useRef(false);
+
+    const animarYSacar = useCallback(() => {
+        if (descartadoRef.current) return;
+        descartadoRef.current = true;
+        Animated.timing(translateX, {
+            toValue: 360,
+            duration: 180,
+            useNativeDriver: true,
+        }).start(() => {
+            onDescartar(item);
+        });
+    }, [item, onDescartar, translateX]);
+
+    const panResponder = useMemo(
+        () =>
+            PanResponder.create({
+                onMoveShouldSetPanResponder: (_evt, gesture) =>
+                    gesture.dx > 12 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.3,
+                onPanResponderMove: (_evt, gesture) => {
+                    if (gesture.dx > 0) {
+                        translateX.setValue(gesture.dx);
+                    }
+                },
+                onPanResponderRelease: (_evt, gesture) => {
+                    if (gesture.dx > 90 || gesture.vx > 0.6) {
+                        animarYSacar();
+                    } else {
+                        Animated.spring(translateX, {
+                            toValue: 0,
+                            useNativeDriver: true,
+                            bounciness: 6,
+                        }).start();
+                    }
+                },
+                onPanResponderTerminate: () => {
+                    Animated.spring(translateX, {
+                        toValue: 0,
+                        useNativeDriver: true,
+                    }).start();
+                },
+            }),
+        [animarYSacar, translateX]
+    );
+
+    const opacity = translateX.interpolate({
+        inputRange: [0, 220],
+        outputRange: [1, 0.25],
+        extrapolate: 'clamp',
+    });
+
+    return (
+        <Animated.View
+            style={{ transform: [{ translateX }], opacity }}
+            {...panResponder.panHandlers}
+        >
+            <TouchableOpacity
+                style={[styles.item, !item.leida && styles.itemNoLeido]}
+                onPress={() => onAbrir(item)}
+                activeOpacity={0.85}
+            >
+                <View style={styles.itemFila}>
+                    <Text style={styles.itemTitulo} numberOfLines={2}>{item.titulo}</Text>
+                    <View style={styles.itemAccionesDerecha}>
+                        {!item.leida && <View style={styles.puntoNoLeido} />}
+                        <TouchableOpacity
+                            style={styles.itemCerrarBtn}
+                            onPress={(e) => {
+                                e?.stopPropagation?.();
+                                animarYSacar();
+                            }}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            accessibilityLabel="Cerrar notificación"
+                        >
+                            <Text style={styles.itemCerrarTexto}>✕</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+                <Text style={styles.itemMensaje}>{item.mensaje}</Text>
+                <Text style={styles.itemFecha}>{fechaLegible(item.creado_en)}</Text>
+            </TouchableOpacity>
+        </Animated.View>
+    );
 };
 
 export const NotificacionesCampana = ({
@@ -82,12 +177,10 @@ export const NotificacionesCampana = ({
     const seleccionar = async (notificacion: NotificacionSoporte) => {
         setAvisoWeb(null);
         setVisible(false);
+        setNotificaciones((actuales) => actuales.filter((item) => item.id !== notificacion.id));
         if (!notificacion.leida) {
             try {
                 await marcarNotificacionLeida(notificacion.id);
-                setNotificaciones((actuales) => actuales.map((item) =>
-                    item.id === notificacion.id ? { ...item, leida: true } : item,
-                ));
             } catch {
                 setMensajeError('No se pudo actualizar el estado de lectura.');
             }
@@ -95,10 +188,23 @@ export const NotificacionesCampana = ({
         onSeleccionar?.(notificacion);
     };
 
+    const descartar = useCallback(async (notificacion: NotificacionSoporte) => {
+        setNotificaciones((actuales) => actuales.filter((item) => item.id !== notificacion.id));
+        if (!notificacion.leida) {
+            try {
+                await marcarNotificacionLeida(notificacion.id);
+            } catch {
+                setMensajeError('No se pudo marcar como leída.');
+            }
+        }
+    }, []);
+
     const leerTodas = async () => {
         try {
             await marcarTodasNotificacionesLeidas();
-            setNotificaciones((actuales) => actuales.map((item) => ({ ...item, leida: true })));
+            setNotificaciones([]);
+            setAvisoWeb(null);
+            setVisible(false);
         } catch {
             setMensajeError('No se pudieron marcar como leídas.');
         }
@@ -167,19 +273,12 @@ export const NotificacionesCampana = ({
                                     <Text style={styles.vacio}>{mensajeError || 'Todavía no tienes notificaciones.'}</Text>
                                 )}
                                 {notificaciones.map((item) => (
-                                    <TouchableOpacity
+                                    <TarjetaNotificacionDeslizable
                                         key={item.id}
-                                        style={[styles.item, !item.leida && styles.itemNoLeido]}
-                                        onPress={() => void seleccionar(item)}
-                                        activeOpacity={0.8}
-                                    >
-                                        <View style={styles.itemFila}>
-                                            <Text style={styles.itemTitulo} numberOfLines={2}>{item.titulo}</Text>
-                                            {!item.leida && <View style={styles.puntoNoLeido} />}
-                                        </View>
-                                        <Text style={styles.itemMensaje}>{item.mensaje}</Text>
-                                        <Text style={styles.itemFecha}>{fechaLegible(item.creado_en)}</Text>
-                                    </TouchableOpacity>
+                                        item={item}
+                                        onAbrir={(n) => void seleccionar(n)}
+                                        onDescartar={(n) => void descartar(n)}
+                                    />
                                 ))}
                                 {insistencias.length > 0 && (
                                     <>
@@ -267,9 +366,19 @@ const styles = StyleSheet.create({
     itemNoLeido: { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' },
     itemInsistencia: { backgroundColor: '#fef2f2', borderColor: '#fecaca' },
     seccion: { color: '#b91c1c', fontSize: 13, fontWeight: '800', marginTop: 8, marginBottom: 9 },
-    itemFila: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+    itemFila: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 },
     itemTitulo: { flex: 1, color: '#173b70', fontSize: 14, fontWeight: '800' },
+    itemAccionesDerecha: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     puntoNoLeido: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#2563eb' },
+    itemCerrarBtn: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: '#e2e8f0',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    itemCerrarTexto: { color: '#475569', fontSize: 12, fontWeight: '800', lineHeight: 14 },
     itemMensaje: { color: '#475569', fontSize: 13, lineHeight: 18, marginTop: 5 },
     itemFecha: { color: '#94a3b8', fontSize: 11, marginTop: 7 },
     vacio: { color: '#64748b', fontSize: 14, textAlign: 'center', paddingVertical: 30 },

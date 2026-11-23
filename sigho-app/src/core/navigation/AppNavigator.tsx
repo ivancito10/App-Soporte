@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { obtenerItem, guardarItem } from '../utils/storage';
-import { View, ActivityIndicator, Platform } from 'react-native';
+import { obtenerItem, guardarItem, eliminarItem } from '../utils/storage';
+import { View, ActivityIndicator, Platform, Alert, AppState } from 'react-native';
+import { registrarManejadorSesionExpirada, tokenJwtExpirado } from '../api/axios.config';
 import { theme } from '../theme/theme';
 import { LoginScreen } from '../../features/auth/screens/LoginScreen';
 import { vincularTokenFCM } from '../../features/auth/api/auth.service';
@@ -13,8 +14,11 @@ import { CrearSolicitudScreen } from '../../features/soportes/screens/CrearSolic
 import { GestionRolesScreen } from '../../features/soportes/screens/GestionRolesScreen';
 import { SinRolScreen } from '../../features/soportes/screens/SinRolScreen';
 import { obtenerMisRoles } from '../../features/soportes/api/soporte.service';
+import * as LocalAuthentication from 'expo-local-authentication';
 
 const Stack = createNativeStackNavigator();
+const STORAGE_KEY_LOGIN_BIOMETRICO = 'soporte_login_biometrico';
+const TIEMPO_INACTIVIDAD_MS = 15 * 60 * 1000; // 15 minutos sin actividad del usuario
 
 export const AppNavigator = () => {
     const [cargando, setCargando] = useState(true);
@@ -22,7 +26,38 @@ export const AppNavigator = () => {
     const [rolActivo, setRolActivo] = useState<string | null>(null);
     const [rolesDisponibles, setRolesDisponibles] = useState<string[]>([]);
     const [solicitudDesdeNotificacion, setSolicitudDesdeNotificacion] = useState<number | null>(null);
+    const [inicioBiometricoCancelado, setInicioBiometricoCancelado] = useState(false);
     const escudosHistorialRef = useRef<number>(0);
+    const biometriaInicialVerificadaRef = useRef(false);
+    const autenticandoBiometriaRef = useRef(false);
+    const ultimaActividadRef = useRef<number>(Date.now());
+    const cerrandoSesionRef = useRef<boolean>(false);
+    const tipoNotificacionPendienteRef = useRef<string | null>(null);
+
+    const cerrarSesionPorSeguridad = useCallback(async (motivo: 'inactividad' | 'expirada') => {
+        if (cerrandoSesionRef.current) return;
+        cerrandoSesionRef.current = true;
+        try {
+            await eliminarItem('jwtToken');
+            await eliminarItem('userData');
+            setInicioBiometricoCancelado(false);
+            setAutenticado(false);
+            setRolActivo(null);
+            setRolesDisponibles([]);
+            const msg = motivo === 'inactividad'
+                ? 'Tu sesión se cerró automáticamente por inactividad (15 minutos).'
+                : 'Tu sesión ha expirado. Por favor inicia sesión nuevamente.';
+            if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                window.alert(msg);
+            } else {
+                Alert.alert('Sesión cerrada', msg);
+            }
+        } finally {
+            setTimeout(() => {
+                cerrandoSesionRef.current = false;
+            }, 1000);
+        }
+    }, []);
 
     // Esta función la llamamos tanto al inicio como justo después del login o al pulsar "Verificar acceso"
     const verificarSesion = async (forzarConsultaServidor = false) => {
@@ -31,6 +66,55 @@ export const AppNavigator = () => {
             let userDataStr = await obtenerItem('userData');
 
             if (token && userDataStr) {
+                if (tokenJwtExpirado(token)) {
+                    await eliminarItem('jwtToken');
+                    await eliminarItem('userData');
+                    setAutenticado(false);
+                    setRolActivo(null);
+                    setRolesDisponibles([]);
+                    return;
+                }
+                if (!biometriaInicialVerificadaRef.current) {
+                    biometriaInicialVerificadaRef.current = true;
+                    const biometriaActivada = await obtenerItem(STORAGE_KEY_LOGIN_BIOMETRICO);
+
+                    if (Platform.OS !== 'web' && biometriaActivada === 'true' && !autenticandoBiometriaRef.current) {
+                        let autenticacionBiometricaCorrecta = false;
+                        autenticandoBiometriaRef.current = true;
+                        try {
+                            const compatible = await LocalAuthentication.hasHardwareAsync();
+                            const enrollado = await LocalAuthentication.isEnrolledAsync();
+                            if (compatible && enrollado) {
+                                await new Promise<void>((resolve) => {
+                                    requestAnimationFrame(() => {
+                                        setTimeout(resolve, 450);
+                                    });
+                                });
+                                const resultado = await LocalAuthentication.authenticateAsync({
+                                    promptMessage: 'Confirma tu identidad',
+                                    cancelLabel: 'Cancelar',
+                                    disableDeviceFallback: true,
+                                });
+                                autenticacionBiometricaCorrecta = resultado.success;
+                            }
+                        } catch (error) {
+                            console.warn('No se pudo completar el desbloqueo biométrico:', error);
+                        } finally {
+                            autenticandoBiometriaRef.current = false;
+                        }
+
+                        if (!autenticacionBiometricaCorrecta) {
+                            await eliminarItem('jwtToken');
+                            await eliminarItem('userData');
+                            setInicioBiometricoCancelado(true);
+                            setAutenticado(false);
+                            setRolActivo(null);
+                            setRolesDisponibles([]);
+                            return;
+                        }
+                    }
+                }
+
                 let userData = JSON.parse(userDataStr);
 
                 // Si no tiene roles o se pide forzar consulta, le preguntamos al backend si el admin ya le asignó rol
@@ -101,17 +185,118 @@ export const AppNavigator = () => {
         verificarSesion();
     }, []);
 
+    useEffect(() => {
+        registrarManejadorSesionExpirada(() => {
+            if (autenticado) {
+                void cerrarSesionPorSeguridad('expirada');
+            }
+        });
+        return () => registrarManejadorSesionExpirada(null);
+    }, [autenticado, cerrarSesionPorSeguridad]);
+
+    const timerInactividadRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const ultimoThrottleRef = useRef<number>(0);
+
+    const reiniciarTemporizadorInactividad = useCallback(() => {
+        if (!autenticado) return;
+        const ahora = Date.now();
+        ultimaActividadRef.current = ahora;
+        if (timerInactividadRef.current) {
+            clearTimeout(timerInactividadRef.current);
+        }
+        timerInactividadRef.current = setTimeout(() => {
+            void cerrarSesionPorSeguridad('inactividad');
+        }, TIEMPO_INACTIVIDAD_MS);
+    }, [autenticado, cerrarSesionPorSeguridad]);
+
+    const registrarActividadUsuario = useCallback(() => {
+        const ahora = Date.now();
+        if (ahora - ultimoThrottleRef.current < 2000) return;
+        ultimoThrottleRef.current = ahora;
+        reiniciarTemporizadorInactividad();
+    }, [reiniciarTemporizadorInactividad]);
+
+    useEffect(() => {
+        if (!autenticado) {
+            if (timerInactividadRef.current) {
+                clearTimeout(timerInactividadRef.current);
+                timerInactividadRef.current = null;
+            }
+            return;
+        }
+
+        reiniciarTemporizadorInactividad();
+
+        const subAppState = AppState.addEventListener('change', async (estado) => {
+            if (estado !== 'active') return;
+            const inactivoMs = Date.now() - ultimaActividadRef.current;
+            if (inactivoMs >= TIEMPO_INACTIVIDAD_MS) {
+                void cerrarSesionPorSeguridad('inactividad');
+                return;
+            }
+            const token = await obtenerItem('jwtToken');
+            if (tokenJwtExpirado(token)) {
+                void cerrarSesionPorSeguridad('expirada');
+                return;
+            }
+            reiniciarTemporizadorInactividad();
+        });
+
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            const eventos: Array<keyof WindowEventMap> = [
+                'pointerdown',
+                'keydown',
+                'mousemove',
+                'wheel',
+                'touchstart',
+                'scroll',
+            ];
+            eventos.forEach((ev) => window.addEventListener(ev, registrarActividadUsuario, true));
+            return () => {
+                subAppState.remove();
+                eventos.forEach((ev) => window.removeEventListener(ev, registrarActividadUsuario, true));
+                if (timerInactividadRef.current) {
+                    clearTimeout(timerInactividadRef.current);
+                    timerInactividadRef.current = null;
+                }
+            };
+        }
+
+        return () => {
+            subAppState.remove();
+            if (timerInactividadRef.current) {
+                clearTimeout(timerInactividadRef.current);
+                timerInactividadRef.current = null;
+            }
+        };
+    }, [autenticado, reiniciarTemporizadorInactividad, registrarActividadUsuario, cerrarSesionPorSeguridad]);
+
     useEffect(() => escucharAperturaNotificacion((datos) => {
-        if (datos.tipoNotificacion !== 'ASIGNACION_TECNICO') return;
-        const idSolicitud = Number(datos.idSolicitud);
+        const idSolicitud = Number(datos?.idSolicitud);
         if (Number.isFinite(idSolicitud) && idSolicitud > 0) {
+            tipoNotificacionPendienteRef.current = typeof datos?.tipoNotificacion === 'string' ? datos.tipoNotificacion : null;
             setSolicitudDesdeNotificacion(idSolicitud);
         }
     }), []);
 
     useEffect(() => {
-        if (!autenticado || !solicitudDesdeNotificacion || !rolesDisponibles.includes('TECNICO')) return;
-        if (rolActivo !== 'TECNICO') void cambiarRol('TECNICO');
+        if (!autenticado || !solicitudDesdeNotificacion) return;
+        const tipo = tipoNotificacionPendienteRef.current;
+        if (tipo === 'ASIGNACION_TECNICO' && rolesDisponibles.includes('TECNICO')) {
+            if (rolActivo !== 'TECNICO') void cambiarRol('TECNICO');
+        } else if (
+            (tipo === 'NUEVA_SOLICITUD_OPERADOR' || tipo === 'INSISTENCIA_SOPORTE') &&
+            rolesDisponibles.includes('OPERADOR') &&
+            rolActivo === 'ADMINISTRADOR'
+        ) {
+            void cambiarRol('OPERADOR');
+        } else if (rolActivo === 'ADMINISTRADOR') {
+            if (rolesDisponibles.includes('OPERADOR')) {
+                void cambiarRol('OPERADOR');
+            } else if (rolesDisponibles.includes('TECNICO')) {
+                void cambiarRol('TECNICO');
+            }
+        }
     }, [autenticado, solicitudDesdeNotificacion, rolesDisponibles, rolActivo, cambiarRol]);
 
     // Bloquear el botón "Atrás" propio del navegador web en TODOS los roles.
@@ -163,6 +348,7 @@ export const AppNavigator = () => {
     }
 
     return (
+        <View style={{ flex: 1 }} onTouchStartCapture={autenticado ? registrarActividadUsuario : undefined}>
         <NavigationContainer
             onStateChange={() => {
                 if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -176,9 +362,11 @@ export const AppNavigator = () => {
                     <Stack.Screen name="Login">
                         {(props) => <LoginScreen {...props} onLogin={async () => {
                             // Cuando el login termina, forzamos a leer el rol antes de cambiar de pantalla
+                            biometriaInicialVerificadaRef.current = true;
+                            setInicioBiometricoCancelado(false);
                             setCargando(true);
                             await verificarSesion();
-                        }} />}
+                        }} iniciarConContrasena={inicioBiometricoCancelado} />}
                     </Stack.Screen>
                 ) : (
                     <>
@@ -190,6 +378,7 @@ export const AppNavigator = () => {
                                         {...props}
                                         onVerificar={() => verificarSesion(true)}
                                         onLogout={() => {
+                                            setInicioBiometricoCancelado(false);
                                             setAutenticado(false);
                                             setRolActivo(null);
                                             setRolesDisponibles([]);
@@ -207,13 +396,14 @@ export const AppNavigator = () => {
                                         onCambiarRol={cambiarRol}
                                         onRolesActualizados={setRolesDisponibles}
                                         onNotificacionSeleccionada={(notificacion: any) => {
-                                            if (notificacion?.datos?.tipoNotificacion !== 'ASIGNACION_TECNICO') return;
                                             const idSolicitud = Number(notificacion?.datos?.idSolicitud);
-                                            if (Number.isFinite(idSolicitud) && idSolicitud > 0 && rolesDisponibles.includes('TECNICO')) {
+                                            if (Number.isFinite(idSolicitud) && idSolicitud > 0) {
+                                                tipoNotificacionPendienteRef.current = notificacion?.datos?.tipoNotificacion || null;
                                                 setSolicitudDesdeNotificacion(idSolicitud);
                                             }
                                         }}
                                         onLogout={() => {
+                                            setInicioBiometricoCancelado(false);
                                             setAutenticado(false);
                                             setRolActivo(null);
                                             setRolesDisponibles([]);
@@ -232,13 +422,14 @@ export const AppNavigator = () => {
                                         solicitudDesdeNotificacion={solicitudDesdeNotificacion}
                                         onNotificacionAbierta={() => setSolicitudDesdeNotificacion(null)}
                                         onNotificacionSeleccionada={(notificacion: any) => {
-                                            if (notificacion?.datos?.tipoNotificacion !== 'ASIGNACION_TECNICO') return;
                                             const idSolicitud = Number(notificacion?.datos?.idSolicitud);
-                                            if (Number.isFinite(idSolicitud) && idSolicitud > 0 && rolesDisponibles.includes('TECNICO')) {
+                                            if (Number.isFinite(idSolicitud) && idSolicitud > 0) {
+                                                tipoNotificacionPendienteRef.current = notificacion?.datos?.tipoNotificacion || null;
                                                 setSolicitudDesdeNotificacion(idSolicitud);
                                             }
                                         }}
                                         onLogout={() => {
+                                            setInicioBiometricoCancelado(false);
                                             setAutenticado(false);
                                             setRolActivo(null);
                                             setRolesDisponibles([]);
@@ -262,5 +453,6 @@ export const AppNavigator = () => {
                 )}
             </Stack.Navigator>
         </NavigationContainer>
+        </View>
     );
 };

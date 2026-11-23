@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { SoporteRepositoryPort } from '../../domain/ports/soporte.repository.port';
@@ -84,10 +84,17 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         }
       }
 
+      const [solicitudConCodigo] = await queryRunner.query(
+        `SELECT codigo_ticket FROM administracion.soporte_solicitudes WHERE id = $1`,
+        [solicitudGuardada.id],
+      );
+
       await queryRunner.commitTransaction();
 
       return {
+        id: solicitudGuardada.id,
         idSolicitud: solicitudGuardada.id,
+        codigoTicket: solicitudConCodigo?.codigo_ticket,
         items: itemsCreados
       };
 
@@ -111,7 +118,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         `INSERT INTO administracion.soporte_solicitudes
           (id_usuario, piso, oficina, consultorio, estado, es_manual, solicitante_manual, created_at, updated_at)
          VALUES ($1, $2, $3, $4, 'EN_PROCESO', TRUE, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-         RETURNING id, created_at`,
+         RETURNING id, created_at, codigo_ticket`,
         [
           idTecnico,
           dto.piso?.trim() || null,
@@ -140,6 +147,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       await queryRunner.commitTransaction();
       return {
         idSolicitud: Number(solicitud.id),
+        codigoTicket: solicitud.codigo_ticket,
         idAsignacion: Number(asignacion.id),
         estado: 'EN_PROCESO',
         prioridad,
@@ -163,8 +171,68 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       let idSolicitudItem = dto.id_solicitud_item;
       let idSolicitudCabecera = dto.idSolicitud;
 
+      if (!idSoporte) {
+        throw new BadRequestException('Debes seleccionar un técnico para asignar el soporte.');
+      }
+
+      // Resolvemos primero el id de cabecera si solo enviaron id_solicitud_item
+      if (!idSolicitudCabecera && idSolicitudItem) {
+        const itemResult = await queryRunner.query(
+          `SELECT id_solicitud FROM administracion.soporte_solicitud_items WHERE id = $1`,
+          [idSolicitudItem]
+        );
+        if (!itemResult || itemResult.length === 0) {
+          throw new BadRequestException('El ítem de solicitud no existe.');
+        }
+        idSolicitudCabecera = Number(itemResult[0].id_solicitud);
+      }
+
+      if (!idSolicitudCabecera) {
+        throw new BadRequestException('Falta el identificador de la solicitud para asignar.');
+      }
+
+      // Bloqueo pesimista a nivel de fila: si dos operadores asignan al mismo tiempo,
+      // el segundo espera aquí hasta que el primero haga COMMIT y luego verá el estado actualizado.
+      const [solicitudBloqueada] = await queryRunner.query(
+        `SELECT id, codigo_ticket, estado
+         FROM administracion.soporte_solicitudes
+         WHERE id = $1
+         FOR UPDATE`,
+        [idSolicitudCabecera]
+      );
+
+      if (!solicitudBloqueada) {
+        throw new BadRequestException('La solicitud de soporte no existe.');
+      }
+
+      const [asignacionActiva] = await queryRunner.query(
+        `SELECT
+           a.id,
+           COALESCE(NULLIF(TRIM(CONCAT_WS(' ', p.nombres, p.p_apellido, p.s_apellido)), ''), u.name) as nombre_tecnico
+         FROM administracion.soporte_asignaciones a
+         INNER JOIN administracion.soporte_solicitud_items si ON si.id = a.id_solicitud_item
+         LEFT JOIN administracion.users u ON u.id = a.id_soporte
+         LEFT JOIN administracion.persona p ON p.id = u.id_persona
+         WHERE si.id_solicitud = $1
+           AND a.estado IN ('ASIGNADA', 'EN_PROCESO')
+         ORDER BY a.id DESC
+         LIMIT 1`,
+        [idSolicitudCabecera]
+      );
+
+      if (asignacionActiva) {
+        const tecnicoTexto = asignacionActiva.nombre_tecnico ? ` a ${asignacionActiva.nombre_tecnico}` : '';
+        throw new ConflictException(`Este ticket ya fue asignado${tecnicoTexto} por otro operador.`);
+      }
+
+      if (solicitudBloqueada.estado !== 'PENDIENTE') {
+        throw new ConflictException(
+          `Este ticket ya no está pendiente (estado actual: ${solicitudBloqueada.estado}).`
+        );
+      }
+
       // Si desde el frontend nos envían idSolicitud (ej. Ticket #6), buscamos su ítem principal
-      if (!idSolicitudItem && idSolicitudCabecera) {
+      if (!idSolicitudItem) {
         const items = await queryRunner.query(
           `SELECT id FROM administracion.soporte_solicitud_items WHERE id_solicitud = $1 ORDER BY id ASC LIMIT 1`,
           [idSolicitudCabecera]
@@ -183,16 +251,12 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         }
       }
 
-      if (!idSolicitudItem || !idSoporte) {
-        throw new Error('Faltan datos para asignar el soporte (id_solicitud_item o id_soporte).');
-      }
-
       const prioridadValida = normalizarPrioridad(dto.prioridad);
 
       const asignacionQuery = `
         INSERT INTO administracion.soporte_asignaciones 
-        (id_solicitud_item, id_soporte, id_asignado_por, fecha_asignacion, estado, observacion, prioridad) 
-        VALUES ($1, $2, $3, CURRENT_TIMESTAMP, 'ASIGNADA', $4, $5) 
+        (id_solicitud_item, id_soporte, id_asignado_por, fecha_asignacion, estado, observacion, prioridad, instrucciones_tecnico) 
+        VALUES ($1, $2, $3, CURRENT_TIMESTAMP, 'ASIGNADA', NULL, $4, $5) 
         RETURNING id;
       `;
 
@@ -200,24 +264,10 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         idSolicitudItem,
         idSoporte,
         idOperador,
-        dto.observacion ?? null,
         prioridadValida,
+        dto.instruccionesTecnico?.trim() || dto.observacion?.trim() || null,
       ]);
       const idAsignacion = asignacionResult[0].id;
-
-      if (!idSolicitudCabecera) {
-        const idSolicitudQuery = `
-          SELECT id_solicitud 
-          FROM administracion.soporte_solicitud_items 
-          WHERE id = $1;
-        `;
-        const itemResult = await queryRunner.query(idSolicitudQuery, [idSolicitudItem]);
-
-        if (!itemResult || itemResult.length === 0) {
-          throw new Error('El ítem de solicitud no existe');
-        }
-        idSolicitudCabecera = itemResult[0].id_solicitud;
-      }
 
       const updateCabeceraQuery = `
         UPDATE administracion.soporte_solicitudes 
@@ -232,11 +282,15 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         id: idAsignacion,
         idAsignacion,
         idSolicitud: idSolicitudCabecera,
+        codigoTicket: solicitudBloqueada?.codigo_ticket,
         estado: 'ASIGNADA'
       };
 
     } catch (error: any) {
       await queryRunner.rollbackTransaction();
+      if (error instanceof HttpException) {
+        throw error;
+      }
       this.logger.error(`Error al asignar soporte: ${error?.message}`, error?.stack);
       throw new InternalServerErrorException('No se pudo asignar el soporte.');
     } finally {
@@ -269,6 +323,12 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         [asignacion.idSolicitudItem],
       );
       const idSolicitud = Number(solicitudRows?.[0]?.id_solicitud);
+      const [solicitudCodigo] = await queryRunner.query(
+        `SELECT codigo_ticket FROM administracion.soporte_solicitudes s
+         INNER JOIN administracion.soporte_solicitud_items si ON si.id_solicitud = s.id
+         WHERE si.id = $1`,
+        [asignacion.idSolicitudItem],
+      );
 
       // 2. Insertar en soporte_reasignaciones usando Entidad
       const nuevaReasignacion = new SoporteReasignacionTypeOrmEntity();
@@ -297,10 +357,10 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       // Cada técnico tiene su propia asignación y sus cronómetros comienzan en cero.
       const nuevaAsignacion = await queryRunner.query(
         `INSERT INTO administracion.soporte_asignaciones
-          (id_solicitud_item, id_soporte, id_asignado_por, fecha_asignacion, fecha_inicio, fecha_fin, estado, observacion, prioridad)
-         VALUES ($1, $2, $3, CURRENT_TIMESTAMP, NULL, NULL, 'ASIGNADA', NULL, $4)
+          (id_solicitud_item, id_soporte, id_asignado_por, fecha_asignacion, fecha_inicio, fecha_fin, estado, observacion, prioridad, instrucciones_tecnico)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP, NULL, NULL, 'ASIGNADA', NULL, $4, $5)
          RETURNING id`,
-        [asignacion.idSolicitudItem, Number(dto.id_a_soporte), idDeSoporte, normalizarPrioridad(asignacion.prioridad)]
+        [asignacion.idSolicitudItem, Number(dto.id_a_soporte), idDeSoporte, normalizarPrioridad(asignacion.prioridad), asignacion.instruccionesTecnico ?? null]
       );
 
       // Aseguramos que la solicitud vuelva a ASIGNADA para el nuevo técnico
@@ -318,6 +378,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         idAsignacionAnterior: asignacion.id,
         idAsignacion: Number(nuevaAsignacion[0].id),
         idSolicitud,
+        codigoTicket: solicitudCodigo?.codigo_ticket,
         nuevoTecnico: dto.id_a_soporte,
       };
 
@@ -407,6 +468,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       SELECT 
         s.id,
         s.id as id_solicitud,
+        s.codigo_ticket,
         s.id_usuario as "idUsuario",
         s.piso,
         s.oficina,
@@ -435,6 +497,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         MAX(a.longitud_llegada) as longitud_llegada,
         MAX(GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_inicio, a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_asignacion))))::int) as segundos_desde_asignacion,
         MAX(CASE WHEN a.fecha_inicio IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_inicio))))::int ELSE NULL END) as segundos_desde_inicio,
+        GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - s.created_at))))::int as segundos_sin_asignar,
         (SELECT c.calificacion FROM administracion.soporte_calificaciones c WHERE c.id_solicitud = s.id LIMIT 1) as calificacion_usuario,
         (SELECT c.created_at FROM administracion.soporte_calificaciones c WHERE c.id_solicitud = s.id LIMIT 1) as fecha_calificacion_usuario,
         (SELECT MIN(ax.fecha_asignacion)
@@ -458,7 +521,22 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
           WHERE rs2.id_solicitud = s.id
           ORDER BY rs2.id DESC
           LIMIT 1
-        ) as ultima_resolicitud_motivo
+        ) as ultima_resolicitud_motivo,
+        (
+          SELECT COALESCE(
+            json_agg(
+              json_build_object(
+                'id', rs2.id,
+                'motivo', rs2.motivo,
+                'fecha', COALESCE(to_jsonb(rs2)->>'fecha_resolicitud', to_jsonb(rs2)->>'fecha', to_jsonb(rs2)->>'created_at')
+              )
+              ORDER BY rs2.id ASC
+            ),
+            '[]'::json
+          )
+          FROM administracion.soporte_re_solicitudes rs2
+          WHERE rs2.id_solicitud = s.id
+        ) as resolicitudes_historial
       FROM administracion.soporte_solicitudes s
       LEFT JOIN administracion.soporte_solicitud_items si ON si.id_solicitud = s.id
       LEFT JOIN LATERAL (
@@ -480,8 +558,8 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
     }
 
     query += `
-      GROUP BY s.id, s.id_usuario, s.piso, s.oficina, s.consultorio, s.estado, s.created_at, s.updated_at
-      ORDER BY s.created_at DESC
+      GROUP BY s.id, s.codigo_ticket, s.id_usuario, s.piso, s.oficina, s.consultorio, s.estado, s.created_at, s.updated_at
+      ORDER BY s.created_at ASC
     `;
 
     return await this.dataSource.query(query, params);
@@ -563,12 +641,17 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
     let query = `
       SELECT 
         s.id as id_solicitud, 
+        s.codigo_ticket,
         s.created_at as fecha_solicitud, 
         s.piso, 
         s.oficina, 
+        s.consultorio,
         s.estado,
         BOOL_OR(s.es_manual) as es_manual,
         MAX(s.solicitante_manual) as solicitante_manual,
+        MAX(COALESCE(NULLIF(TRIM(CONCAT_WS(' ', ps.nombres, ps.p_apellido, ps.s_apellido)), ''), us.name)) as nombre_usuario,
+        MAX(us.name) as username,
+        MAX(ps.ci) as ci_usuario,
         COUNT(DISTINCT rs.id)::int as cantidad_resolicitudes,
         MAX(COALESCE(to_jsonb(rs)->>'fecha_resolicitud', to_jsonb(rs)->>'fecha', to_jsonb(rs)->>'created_at')) as ultima_resolicitud,
         (
@@ -578,6 +661,21 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
           ORDER BY rs2.id DESC
           LIMIT 1
         ) as ultima_resolicitud_motivo,
+        (
+          SELECT COALESCE(
+            json_agg(
+              json_build_object(
+                'id', rs2.id,
+                'motivo', rs2.motivo,
+                'fecha', COALESCE(to_jsonb(rs2)->>'fecha_resolicitud', to_jsonb(rs2)->>'fecha', to_jsonb(rs2)->>'created_at')
+              )
+              ORDER BY rs2.id ASC
+            ),
+            '[]'::json
+          )
+          FROM administracion.soporte_re_solicitudes rs2
+          WHERE rs2.id_solicitud = s.id
+        ) as resolicitudes_historial,
         
         -- MAPEAMOS TUS COLUMNAS REALES
         MAX(a.id) as id_asignacion,
@@ -598,6 +696,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         MAX(a.longitud_llegada) as longitud_llegada,
         MAX(GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_inicio, a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_asignacion))))::int) as segundos_desde_asignacion,
         MAX(CASE WHEN a.fecha_inicio IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (COALESCE(a.fecha_fin, CURRENT_TIMESTAMP) - a.fecha_inicio))))::int ELSE NULL END) as segundos_desde_inicio,
+        GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - s.created_at))))::int as segundos_sin_asignar,
         (SELECT c.calificacion FROM administracion.soporte_calificaciones c WHERE c.id_solicitud = s.id LIMIT 1) as calificacion_usuario,
         (SELECT c.created_at FROM administracion.soporte_calificaciones c WHERE c.id_solicitud = s.id LIMIT 1) as fecha_calificacion_usuario,
         (SELECT MIN(ax.fecha_asignacion)
@@ -640,6 +739,8 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       -- En tu BD la tabla de usuarios es administracion.users y la persona tiene el nombre completo
       LEFT JOIN administracion.users u ON u.id = a.id_soporte
       LEFT JOIN administracion.persona p ON p.id = u.id_persona
+      LEFT JOIN administracion.users us ON us.id = s.id_usuario
+      LEFT JOIN administracion.persona ps ON ps.id = us.id_persona
     `;
 
     const queryParams: any[] = [];
@@ -653,11 +754,13 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
     query += `
       GROUP BY 
         s.id, 
+        s.codigo_ticket,
         s.created_at, 
         s.piso, 
         s.oficina, 
+        s.consultorio,
         s.estado
-      ORDER BY s.created_at DESC
+      ORDER BY s.created_at ASC
     `;
 
     // Ejecutamos la consulta
@@ -695,9 +798,14 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       SELECT 
         a.id as id_asignacion,
         s.id as id_solicitud,
+        s.codigo_ticket,
         s.oficina,
+        s.consultorio,
         s.es_manual,
         s.solicitante_manual,
+        COALESCE(NULLIF(TRIM(CONCAT_WS(' ', ps.nombres, ps.p_apellido, ps.s_apellido)), ''), us.name) as nombre_usuario,
+        us.name as username,
+        ps.ci as ci_usuario,
         a.id_soporte as id_tecnico, 
         a.estado,
         a.fecha_asignacion,
@@ -716,6 +824,8 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       
       -- JOIN con la tabla cabecera 'soporte_solicitudes' para obtener la oficina y el id
       INNER JOIN administracion.soporte_solicitudes s ON si.id_solicitud = s.id
+      LEFT JOIN administracion.users us ON us.id = s.id_usuario
+      LEFT JOIN administracion.persona ps ON ps.id = us.id_persona
     `;
 
     const params: any[] = [];
@@ -724,7 +834,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       params.push(estadoFiltro);
     }
 
-    query += ` ORDER BY a.fecha_asignacion DESC`;
+    query += ` ORDER BY a.fecha_asignacion ASC`;
 
     return await this.dataSource.query(query, params);
   }
@@ -736,6 +846,8 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       SELECT 
         a.id as id_asignacion,
         s.id as id_solicitud,
+        s.codigo_ticket,
+        a.instrucciones_tecnico,
         s.created_at as fecha_solicitud,
         (SELECT MIN(ax.fecha_asignacion)
          FROM administracion.soporte_asignaciones ax
@@ -751,6 +863,9 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         s.consultorio,
         s.es_manual,
         s.solicitante_manual,
+        COALESCE(NULLIF(TRIM(CONCAT_WS(' ', ps.nombres, ps.p_apellido, ps.s_apellido)), ''), us.name) as nombre_usuario,
+        us.name as username,
+        ps.ci as ci_usuario,
         a.estado,
         a.prioridad,
         CASE WHEN a.estado = 'ASIGNADA' AND legado.fecha_derivacion IS NOT NULL THEN legado.fecha_derivacion ELSE a.fecha_asignacion END as fecha_asignacion,
@@ -813,12 +928,29 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
           WHERE rs2.id_solicitud = s.id
           ORDER BY rs2.id DESC
           LIMIT 1
-        ) as ultima_resolicitud_motivo
+        ) as ultima_resolicitud_motivo,
+        (
+          SELECT COALESCE(
+            json_agg(
+              json_build_object(
+                'id', rs2.id,
+                'motivo', rs2.motivo,
+                'fecha', COALESCE(to_jsonb(rs2)->>'fecha_resolicitud', to_jsonb(rs2)->>'fecha', to_jsonb(rs2)->>'created_at')
+              )
+              ORDER BY rs2.id ASC
+            ),
+            '[]'::json
+          )
+          FROM administracion.soporte_re_solicitudes rs2
+          WHERE rs2.id_solicitud = s.id
+        ) as resolicitudes_historial
       FROM administracion.soporte_asignaciones a
       INNER JOIN administracion.soporte_solicitud_items si ON a.id_solicitud_item = si.id
       INNER JOIN administracion.soporte_solicitudes s ON si.id_solicitud = s.id
       LEFT JOIN administracion.users u ON u.id = a.id_soporte
       LEFT JOIN administracion.persona p ON p.id = u.id_persona
+      LEFT JOIN administracion.users us ON us.id = s.id_usuario
+      LEFT JOIN administracion.persona ps ON ps.id = us.id_persona
       LEFT JOIN LATERAL (
         SELECT MAX(r.fecha) AS fecha_derivacion
         FROM administracion.soporte_reasignaciones r
@@ -839,7 +971,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       params.push(estadoFiltro);
     }
 
-    query += ` ORDER BY a.fecha_asignacion DESC`;
+    query += ` ORDER BY a.fecha_asignacion ASC`;
 
     return await this.dataSource.query(query, params);
   }
@@ -847,7 +979,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
   async resolicitarSoporte(idSolicitud: number, idUsuario: number, observacion?: string): Promise<any> {
     // 1. Verificamos si la solicitud es del usuario, si no está finalizada y obtenemos su ubicación (oficina, piso)
     const solicitud = await this.dataSource.query(
-      `SELECT id, estado, piso, oficina, consultorio 
+      `SELECT id, codigo_ticket, estado, piso, oficina, consultorio
        FROM administracion.soporte_solicitudes 
        WHERE id = $1 AND id_usuario = $2`,
       [idSolicitud, idUsuario]
@@ -885,25 +1017,33 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
     const tokensTecnico: string[] = rowsTecnico
       .map((r: any) => r.token_dispositivo)
       .filter(Boolean);
+    const idsTecnico: number[] = rowsTecnico
+      .map((r: any) => Number(r.id_soporte))
+      .filter((id: number) => Number.isFinite(id) && id > 0);
 
-    // 4. Buscamos los fcm_token (token_dispositivo) de todos los Operadores activos
+    // 4. Buscamos todos los Operadores activos y sus tokens FCM
     const rowsOperadores = await this.dataSource.query(
       `SELECT DISTINCT ft.token_dispositivo, sur.id_usuario
        FROM administracion.soportes_usuarios_roles sur
-       INNER JOIN administracion.soporte_fcm_tokens ft ON ft.id_usuario = sur.id_usuario
-       WHERE sur.rol_soporte = 'OPERADOR' AND sur.estado = true`
+       LEFT JOIN administracion.soporte_fcm_tokens ft ON ft.id_usuario = sur.id_usuario
+       WHERE UPPER(sur.rol_soporte) = 'OPERADOR' AND sur.estado = true`
     );
 
     const tokensOperadores: string[] = rowsOperadores
       .map((r: any) => r.token_dispositivo)
       .filter(Boolean);
+    const idsOperadores: number[] = rowsOperadores
+      .map((r: any) => Number(r.id_usuario))
+      .filter((id: number) => Number.isFinite(id) && id > 0);
 
     // Unificamos ambos conjuntos sin duplicados para enviar la alerta tanto a Operadores como al Técnico asignado
     const tokensDestino = Array.from(new Set([...tokensTecnico, ...tokensOperadores]));
+    const idsDestino = Array.from(new Set([...idsTecnico, ...idsOperadores]));
 
     return {
       exito: true,
       mensaje: 'Re-solicitud enviada correctamente al operador y al técnico.',
+      codigoTicket: ticket.codigo_ticket,
       piso: ticket.piso,
       oficina: ticket.oficina,
       consultorio: ticket.consultorio,
@@ -911,7 +1051,19 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
       tokensTecnico,
       tokensOperadores,
       tokensDestino,
+      idsDestino,
     };
+  }
+
+  async obtenerIdsOperadoresActivos(): Promise<number[]> {
+    const rows = await this.dataSource.query(
+      `SELECT DISTINCT id_usuario
+       FROM administracion.soportes_usuarios_roles
+       WHERE UPPER(rol_soporte) = 'OPERADOR' AND estado = true`
+    );
+    return rows
+      .map((r: any) => Number(r.id_usuario))
+      .filter((id: number) => Number.isFinite(id) && id > 0);
   }
 
   async obtenerTokensOperadoresActivos(): Promise<string[]> {
@@ -1179,7 +1331,7 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
   }
 
   // OPERADOR: Reasignar técnico guardando justificación en soporte_reasignaciones (Opción A)
-  async reasignarPorOperador(idSolicitud: number, idNuevoTecnico: number, justificacion: string, prioridad?: string, idOperador?: number): Promise<any> {
+  async reasignarPorOperador(idSolicitud: number, idNuevoTecnico: number, justificacion: string, prioridad?: string, idOperador?: number, instruccionesTecnico?: string): Promise<any> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -1187,7 +1339,8 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
     try {
       // 1. Buscamos la asignación actual del ticket
       const asignacionActual = await queryRunner.query(
-        `SELECT a.id, a.id_soporte, a.estado, a.prioridad, a.id_solicitud_item, a.id_asignado_por, s.estado as estado_solicitud
+        `SELECT a.id, a.id_soporte, a.estado, a.prioridad, a.id_solicitud_item, a.id_asignado_por, a.instrucciones_tecnico,
+                s.estado as estado_solicitud, s.codigo_ticket
          FROM administracion.soporte_asignaciones a
          INNER JOIN administracion.soporte_solicitud_items si ON a.id_solicitud_item = si.id
          INNER JOIN administracion.soporte_solicitudes s ON si.id_solicitud = s.id
@@ -1226,10 +1379,10 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
 
       const nuevaAsignacion = await queryRunner.query(
         `INSERT INTO administracion.soporte_asignaciones
-          (id_solicitud_item, id_soporte, id_asignado_por, fecha_asignacion, fecha_inicio, fecha_fin, estado, observacion, prioridad)
-         VALUES ($1, $2, $3, CURRENT_TIMESTAMP, NULL, NULL, 'ASIGNADA', NULL, $4)
+          (id_solicitud_item, id_soporte, id_asignado_por, fecha_asignacion, fecha_inicio, fecha_fin, estado, observacion, prioridad, instrucciones_tecnico)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP, NULL, NULL, 'ASIGNADA', NULL, $4, $5)
          RETURNING id`,
-        [asignacion.id_solicitud_item, idNuevoTecnico, idOperador || asignacion.id_asignado_por, prioridadFinal]
+        [asignacion.id_solicitud_item, idNuevoTecnico, idOperador || asignacion.id_asignado_por, prioridadFinal, instruccionesTecnico?.trim() || asignacion.instrucciones_tecnico || null]
       );
 
       await queryRunner.query(
@@ -1246,6 +1399,8 @@ export class PostgresSoporteRepository implements SoporteRepositoryPort {
         idAsignacion: Number(nuevaAsignacion[0].id),
         idDeSoporte: asignacion.id_soporte,
         idASoporte: idNuevoTecnico,
+        codigoTicket: asignacion.codigo_ticket,
+        instruccionesTecnico: instruccionesTecnico?.trim() || asignacion.instrucciones_tecnico || null,
       };
     } catch (error: any) {
       await queryRunner.rollbackTransaction();

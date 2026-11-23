@@ -55,38 +55,108 @@ const formatearSegundos = (totalSegundos: number) => {
     return `${minutos}m ${segundos}s`;
 };
 
+const calcularBaseSegundos = (
+    segundosServidor: number | null | undefined,
+    fechaInicioIso?: string,
+    fechaFinIso?: string
+): number | null => {
+    if (segundosServidor !== undefined && segundosServidor !== null) {
+        return Math.max(0, Number(segundosServidor));
+    }
+    const inicioMs = fechaInicioIso ? new Date(fechaInicioIso).getTime() : NaN;
+    const finMs = fechaFinIso ? new Date(fechaFinIso).getTime() : Date.now();
+    return Number.isFinite(inicioMs) && Number.isFinite(finMs)
+        ? Math.max(0, Math.floor((finMs - inicioMs) / 1000))
+        : null;
+};
+
 const TiempoEnVivo = ({ ticket }: { ticket: TicketSoporte }) => {
-    const [ahora, setAhora] = useState(Date.now());
     const estado = ticket.estado;
-    const fechaBase = estado === 'PENDIENTE'
-        ? ticket.fecha_solicitud
+    const sinAsignarAun = estado === 'PENDIENTE' || !ticket.fecha_asignacion;
+
+    const baseSinAsignar = sinAsignarAun
+        ? calcularBaseSegundos(ticket.segundos_sin_asignar, ticket.fecha_solicitud)
+        : calcularBaseSegundos(
+            ticket.segundos_hasta_asignacion,
+            ticket.fecha_solicitud,
+            ticket.fecha_primera_asignacion || ticket.fecha_asignacion
+        );
+
+    const baseAsignado = !sinAsignarAun
+        ? calcularBaseSegundos(
+            ticket.segundos_desde_asignacion,
+            ticket.fecha_asignacion,
+            estado === 'EN_PROCESO' ? ticket.fecha_inicio : undefined
+        )
+        : null;
+
+    const baseEnProceso = estado === 'EN_PROCESO'
+        ? calcularBaseSegundos(ticket.segundos_desde_inicio, ticket.fecha_inicio)
+        : null;
+
+    const baseActiva = sinAsignarAun
+        ? baseSinAsignar
         : estado === 'ASIGNADA'
-            ? ticket.fecha_asignacion
+            ? baseAsignado
             : estado === 'EN_PROCESO'
-                ? ticket.fecha_inicio
-                : undefined;
-    const etiqueta = estado === 'PENDIENTE'
-        ? 'Solicitud sin asignar'
-        : estado === 'ASIGNADA'
-            ? 'Tiempo asignado'
-            : 'Tiempo en proceso';
+                ? baseEnProceso
+                : null;
+
+    const [syncedAt, setSyncedAt] = useState(() => Date.now());
+    const [ahora, setAhora] = useState(() => Date.now());
 
     useEffect(() => {
-        setAhora(Date.now());
+        const ts = Date.now();
+        setSyncedAt(ts);
+        setAhora(ts);
         const intervalo = setInterval(() => setAhora(Date.now()), 1000);
         return () => clearInterval(intervalo);
-    }, [ticket.id_solicitud, ticket.estado, fechaBase]);
+    }, [ticket.id_solicitud, estado, baseActiva]);
 
-    if (!fechaBase || estado === 'FINALIZADA') return null;
-    const fechaMs = new Date(fechaBase).getTime();
-    if (!Number.isFinite(fechaMs)) return null;
+    if (estado === 'FINALIZADA' || baseActiva === null) return null;
+
+    const delta = Math.max(0, Math.floor((ahora - syncedAt) / 1000));
+    const segsSinAsignar = sinAsignarAun ? (baseSinAsignar ?? 0) + delta : baseSinAsignar;
+    const segsAsignado = !sinAsignarAun
+        ? estado === 'ASIGNADA'
+            ? (baseAsignado ?? 0) + delta
+            : baseAsignado
+        : null;
+    const segsEnProceso = estado === 'EN_PROCESO' ? (baseEnProceso ?? 0) + delta : null;
 
     return (
-        <View style={styles.liveTimerBox}>
-            <AppIcon name="clock" size={14} color="#1e40af" />
-            <Text style={styles.liveTimerText}>
-                {etiqueta}: <Text style={styles.liveTimerValue}>{formatearSegundos((ahora - fechaMs) / 1000)}</Text>
-            </Text>
+        <View style={styles.liveTimersContainer}>
+            {segsSinAsignar !== null && (
+                <View style={styles.liveTimerBox}>
+                    <AppIcon name="clock" size={14} color={sinAsignarAun ? '#b45309' : '#475569'} />
+                    <Text style={styles.liveTimerText}>
+                        {sinAsignarAun ? 'Sin asignar: ' : 'Esperó asignación: '}
+                        <Text style={[styles.liveTimerValue, sinAsignarAun && { color: '#b45309' }]}>
+                            {formatearSegundos(segsSinAsignar)}
+                        </Text>
+                    </Text>
+                </View>
+            )}
+            {segsAsignado !== null && (
+                <View style={styles.liveTimerBox}>
+                    <AppIcon name="clock" size={14} color="#1e40af" />
+                    <Text style={styles.liveTimerText}>
+                        {estado === 'ASIGNADA' ? 'Tiempo asignado: ' : 'Tiempo asignado: '}
+                        <Text style={styles.liveTimerValue}>{formatearSegundos(segsAsignado)}</Text>
+                    </Text>
+                </View>
+            )}
+            {segsEnProceso !== null && (
+                <View style={[styles.liveTimerBox, { backgroundColor: '#f3e8ff', borderColor: '#ddd6fe' }]}>
+                    <AppIcon name="wrench" size={14} color="#6d28d9" />
+                    <Text style={[styles.liveTimerText, { color: '#5b21b6' }]}>
+                        En proceso:{' '}
+                        <Text style={[styles.liveTimerValue, { color: '#4c1d95' }]}>
+                            {formatearSegundos(segsEnProceso)}
+                        </Text>
+                    </Text>
+                </View>
+            )}
         </View>
     );
 };
@@ -174,7 +244,9 @@ export const CardTicket = ({ ticket, onPress, mostrarTiempoEnVivo = false, ocult
                 </View>
 
                 <Text style={styles.ticketIdRight}>
-                    {ticket.estado === 'FINALIZADA' ? `Historial #${idReal}` : `Ticket #${idReal}`}
+                    {ticket.estado === 'FINALIZADA'
+                        ? `Historial ${ticket.codigo_ticket || `#${idReal}`}`
+                        : `Ticket ${ticket.codigo_ticket || `#${idReal}`}`}
                 </Text>
             </View>
 
@@ -195,14 +267,25 @@ export const CardTicket = ({ ticket, onPress, mostrarTiempoEnVivo = false, ocult
 
             {/* 3. DETALLES CON ICONOS VECTORIALES LIMPIOS */}
             <View style={styles.detailsList}>
-                {ticket.es_manual && (
+                {ticket.es_manual ? (
                     <View style={styles.iconRowItem}>
                         <AppIcon name="user" size={15} color="#0e7490" />
                         <Text style={[styles.detailRowText, { color: '#0e7490', fontWeight: '600', marginLeft: 7 }]}>
                             Solicitud verbal de: {ticket.solicitante_manual || 'Solicitante sin nombre'}
                         </Text>
                     </View>
-                )}
+                ) : (ticket.nombre_usuario || ticket.username) ? (
+                    <View style={styles.iconRowItem}>
+                        <AppIcon name="user" size={15} color="#0f4c9c" />
+                        <Text style={[styles.detailRowText, { marginLeft: 7 }]}>
+                            Solicitante:{' '}
+                            <Text style={{ fontWeight: '600', color: '#0f172a' }}>
+                                {ticket.nombre_usuario || ticket.username}
+                            </Text>
+                            {ticket.ci_usuario ? ` (CI: ${ticket.ci_usuario})` : ''}
+                        </Text>
+                    </View>
+                ) : null}
 
                 {ticket.estado === 'EN_PROCESO' ? (
                     <View style={styles.iconRowItem}>
@@ -261,17 +344,28 @@ export const CardTicket = ({ ticket, onPress, mostrarTiempoEnVivo = false, ocult
                         </View>
 
                         <View style={styles.metricsSummaryRow}>
+                            {ticket.segundos_hasta_asignacion !== undefined && ticket.segundos_hasta_asignacion !== null && (
+                                <View style={styles.iconRowItem}>
+                                    <AppIcon name="clock" size={13} color="#b45309" />
+                                    <Text style={[styles.metricItemText, { marginLeft: 6 }]}>
+                                        <Text style={{ fontWeight: 'bold', color: '#b45309' }}>Sin asignar:</Text>{' '}
+                                        <Text style={{ fontWeight: 'bold', color: '#0f172a' }}>
+                                            {formatearSegundos(Number(ticket.segundos_hasta_asignacion))}
+                                        </Text>
+                                    </Text>
+                                </View>
+                            )}
                             <View style={styles.iconRowItem}>
                                 <AppIcon name="clock" size={13} color="#1e40af" />
                                 <Text style={[styles.metricItemText, { marginLeft: 6 }]}>
-                                    <Text style={{ fontWeight: 'bold', color: '#1e40af' }}>1. Total desde Asignación:</Text>{' '}
+                                    <Text style={{ fontWeight: 'bold', color: '#1e40af' }}>Total desde Asignación:</Text>{' '}
                                     <Text style={{ fontWeight: 'bold', color: '#0f172a' }}>{obtenerTiempoTotalAsignacion(ticket)}</Text>
                                 </Text>
                             </View>
                             <View style={styles.iconRowItem}>
                                 <AppIcon name="wrench" size={13} color="#6d28d9" />
                                 <Text style={[styles.metricItemText, { marginLeft: 6 }]}>
-                                    <Text style={{ fontWeight: 'bold', color: '#6d28d9' }}>2. Efectivo de trabajo:</Text>{' '}
+                                    <Text style={{ fontWeight: 'bold', color: '#6d28d9' }}>Efectivo de trabajo:</Text>{' '}
                                     <Text style={{ fontWeight: 'bold', color: '#0f172a' }}>{obtenerTiempoEfectivoTrabajo(ticket)}</Text>
                                 </Text>
                             </View>
@@ -293,10 +387,28 @@ export const CardTicket = ({ ticket, onPress, mostrarTiempoEnVivo = false, ocult
                         <View style={styles.iconRowItem}>
                             <AppIcon name="alert" size={14} color="#b91c1c" />
                             <Text style={[styles.insistenciaAlertTitle, { marginLeft: 6, flex: 1 }]}>
-                                Insistencia: El usuario de {ticket.oficina} {ticket.piso ? `(${ticket.piso})` : ''} requiere atención demorada ({ticket.cantidad_resolicitudes})
+                                Insistencias de {[ticket.oficina, ticket.piso].filter(Boolean).join(' — ') || 'usuario'} ({ticket.cantidad_resolicitudes})
                             </Text>
                         </View>
-                        {ticket.ultima_resolicitud_motivo ? (
+                        {Array.isArray(ticket.resolicitudes_historial) && ticket.resolicitudes_historial.length > 0 ? (
+                            <View style={styles.insistenciaLista}>
+                                {ticket.resolicitudes_historial.map((ins, idx) => (
+                                    <View key={ins.id ?? idx} style={styles.insistenciaItemRow}>
+                                        <Text style={styles.insistenciaItemIndex}>#{idx + 1}</Text>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.insistenciaAlertMotivo}>
+                                                {ins.motivo ? `"${ins.motivo}"` : 'Sin comentario'}
+                                            </Text>
+                                            {ins.fecha ? (
+                                                <Text style={styles.insistenciaItemFecha}>
+                                                    {formatearFechaHora(ins.fecha)}
+                                                </Text>
+                                            ) : null}
+                                        </View>
+                                    </View>
+                                ))}
+                            </View>
+                        ) : ticket.ultima_resolicitud_motivo ? (
                             <Text style={styles.insistenciaAlertMotivo}>
                                 Motivo: "{ticket.ultima_resolicitud_motivo}"
                             </Text>
@@ -359,9 +471,12 @@ const styles = StyleSheet.create({
         letterSpacing: 0.3,
     },
     ticketIdRight: {
-        fontSize: 12,
+        fontSize: 10.5,
         color: '#64748b',
         fontWeight: '600',
+        maxWidth: '54%',
+        flexShrink: 1,
+        textAlign: 'right',
     },
 
     mainHeaderRow: {
@@ -410,6 +525,10 @@ const styles = StyleSheet.create({
         fontSize: 13,
         color: '#334155',
     },
+    liveTimersContainer: {
+        marginTop: 4,
+        gap: 6,
+    },
     liveTimerBox: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -418,7 +537,8 @@ const styles = StyleSheet.create({
         borderRadius: 8,
         paddingHorizontal: 10,
         paddingVertical: 8,
-        marginTop: 2,
+        borderWidth: 1,
+        borderColor: '#dbeafe',
     },
     liveTimerText: {
         flex: 1,
@@ -477,6 +597,33 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#991b1b',
         marginTop: 2,
+    },
+    insistenciaLista: {
+        marginTop: 6,
+        gap: 6,
+    },
+    insistenciaItemRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 6,
+        paddingTop: 5,
+        borderTopWidth: 1,
+        borderTopColor: '#fecaca',
+    },
+    insistenciaItemIndex: {
+        fontSize: 11,
+        fontWeight: 'bold',
+        color: '#b91c1c',
+        backgroundColor: '#fee2e2',
+        paddingHorizontal: 6,
+        paddingVertical: 1,
+        borderRadius: 6,
+        marginTop: 1,
+    },
+    insistenciaItemFecha: {
+        fontSize: 11,
+        color: '#b91c1c',
+        marginTop: 1,
     },
 
     cardFooterRow: {

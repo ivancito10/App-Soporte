@@ -133,6 +133,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
 
     const [observacion, setObservacion] = useState('');
     const [justificacionReasignacion, setJustificacionReasignacion] = useState('');
+    const [instruccionesTecnico, setInstruccionesTecnico] = useState('');
     const [diagnostico, setDiagnostico] = useState('');
 
     const [tecnicos, setTecnicos] = useState<any[]>([]);
@@ -300,6 +301,9 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
         const fechaPrimeraAsignacionMs = ticket.fecha_primera_asignacion || ticket.fecha_asignacion
             ? new Date(ticket.fecha_primera_asignacion || ticket.fecha_asignacion || '').getTime()
             : NaN;
+        const segSinAsignarServidor = ticket.segundos_sin_asignar !== undefined && ticket.segundos_sin_asignar !== null
+            ? Math.max(0, Number(ticket.segundos_sin_asignar))
+            : null;
         const segundosEsperaCerrada = ticket.segundos_hasta_asignacion !== undefined && ticket.segundos_hasta_asignacion !== null
             ? Number(ticket.segundos_hasta_asignacion)
             : Number.isFinite(fechaSolicitudMs) && Number.isFinite(fechaPrimeraAsignacionMs)
@@ -324,11 +328,16 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             ? Math.max(segAsignacionServidor, segAsignacionPorFecha)
             : segAsignacionServidor ?? segAsignacionPorFecha;
 
-        const actualizarEsperaAsignacion = (ahora: number) => {
+        const actualizarEsperaAsignacion = (ahora: number, deltaSegundos = 0) => {
             if (segundosEsperaCerrada !== null) {
                 setTiempoEsperaAsignacion(formatearSegundos(segundosEsperaCerrada));
-            } else if (estadoActual === 'PENDIENTE' && Number.isFinite(fechaSolicitudMs)) {
-                setTiempoEsperaAsignacion(formatearSegundos((ahora - fechaSolicitudMs) / 1000));
+            } else if (estadoActual === 'PENDIENTE') {
+                const baseEspera = segSinAsignarServidor !== null
+                    ? segSinAsignarServidor
+                    : (Number.isFinite(fechaSolicitudMs)
+                        ? Math.max(0, Math.floor((montoPantallaMs - fechaSolicitudMs) / 1000))
+                        : 0);
+                setTiempoEsperaAsignacion(formatearSegundos(baseEspera + deltaSegundos));
             } else {
                 setTiempoEsperaAsignacion('No disponible');
             }
@@ -349,8 +358,8 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
 
         const actualizarRelojes = () => {
             const ahora = Date.now();
-            const deltaSegundos = Math.floor((ahora - montoPantallaMs) / 1000);
-            actualizarEsperaAsignacion(ahora);
+            const deltaSegundos = Math.max(0, Math.floor((ahora - montoPantallaMs) / 1000));
+            actualizarEsperaAsignacion(ahora, deltaSegundos);
 
             if (segAsignacionBase !== null) {
                 setTiempoDesdeAsignacion(formatearSegundos(segAsignacionBase + (estadoActual === 'ASIGNADA' ? deltaSegundos : 0)));
@@ -374,7 +383,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
         actualizarRelojes();
         const intervalo = setInterval(actualizarRelojes, 1000);
         return () => clearInterval(intervalo);
-    }, [fechaSolicitudTicket, ticket.fecha_primera_asignacion, ticket.segundos_hasta_asignacion, ticket.fecha_asignacion, ticket.fecha_inicio, ticket.fecha_finalizacion, ticket.segundos_desde_asignacion, estadoActual, baseSegundosInicio, timestampInicioLocal]);
+    }, [fechaSolicitudTicket, ticket.segundos_sin_asignar, ticket.fecha_primera_asignacion, ticket.segundos_hasta_asignacion, ticket.fecha_asignacion, ticket.fecha_inicio, ticket.fecha_finalizacion, ticket.segundos_desde_asignacion, estadoActual, baseSegundosInicio, timestampInicioLocal]);
 
     // Acciones
     const handleAgregarItem = async () => {
@@ -427,12 +436,20 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
 
         setCargando(true);
         try {
-            await asignarSoporte(Number(idReal), Number(idTecnico), prioridad);
+            await asignarSoporte(Number(idReal), Number(idTecnico), prioridad, instruccionesTecnico.trim() || undefined);
             Alert.alert('Éxito', `El ticket ha sido asignado al técnico con prioridad ${prioridad}.`);
             navigation.goBack();
         } catch (error: any) {
             console.error('Error al asignar técnico:', error);
-            Alert.alert('Error', 'No se pudo asignar el técnico al ticket.');
+            const msg = error?.response?.data?.message || 'No se pudo asignar el técnico al ticket.';
+            if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                window.alert(msg);
+            } else {
+                Alert.alert('No se pudo asignar', msg);
+            }
+            if (error?.response?.status === 409) {
+                navigation.goBack();
+            }
         } finally {
             setCargando(false);
         }
@@ -450,7 +467,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
 
         setCargando(true);
         try {
-            await reasignarSoporteOperador(Number(idReal), Number(idTecnico), justificacionReasignacion.trim(), prioridad);
+            await reasignarSoporteOperador(Number(idReal), Number(idTecnico), justificacionReasignacion.trim(), prioridad, instruccionesTecnico.trim() || undefined);
             Alert.alert('Éxito', 'El ticket fue reasignado al nuevo técnico correctamente.');
             navigation.goBack();
         } catch (error: any) {
@@ -705,7 +722,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                             </View>
                             <View style={{ flex: 1 }}>
                                 <Text style={styles.sectionBannerTitle}>
-                                    Ticket #{idReal}
+                                    Ticket {ticket.codigo_ticket || `#${idReal}`}
                                 </Text>
                                 <Text style={styles.sectionBannerSub}>
                                     Información y seguimiento de la solicitud
@@ -892,6 +909,16 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                 <Text style={styles.emptyItemsText}>No se pudieron cargar los problemas.</Text>
                             )}
 
+                            {rolUsuario === RolBandeja.TECNICO && Boolean(ticket.instrucciones_tecnico?.trim()) && (
+                                <View style={styles.operatorInstructionsBox}>
+                                    <View style={styles.operatorInstructionsHeading}>
+                                        <AppIcon name="document-text" size={16} color="#1d4ed8" />
+                                        <Text style={styles.operatorInstructionsTitle}>Indicaciones del operador</Text>
+                                    </View>
+                                    <Text style={styles.operatorInstructionsText}>{ticket.instrucciones_tecnico}</Text>
+                                </View>
+                            )}
+
                             {/* TÉCNICO ASIGNADO */}
                             {Boolean(ticket.nombre_tecnico) && (
                                 <View style={styles.techAssignedBox}>
@@ -942,15 +969,33 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                             )}
 
                             {/* AVISO DE INSISTENCIA */}
-                            {Number(ticket.cantidad_resolicitudes || 0) > 0 && estadoActual !== 'FINALIZADA' && (
+                            {(Number(ticket.cantidad_resolicitudes || 0) > 0 || (Array.isArray(ticket.resolicitudes_historial) && ticket.resolicitudes_historial.length > 0)) && (
                                 <View style={styles.dangerAlertBox}>
                                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                         <AppIcon name="alert" size={13} color="#c0392b" />
                                         <Text style={styles.dangerAlertTitle}>
-                                            Insistencia ({ticket.cantidad_resolicitudes}): Atención demorada
+                                            Insistencias del usuario ({ticket.resolicitudes_historial?.length || ticket.cantidad_resolicitudes}): Atención demorada
                                         </Text>
                                     </View>
-                                    {ticket.ultima_resolicitud_motivo ? (
+                                    {Array.isArray(ticket.resolicitudes_historial) && ticket.resolicitudes_historial.length > 0 ? (
+                                        <View style={styles.insistenciaLista}>
+                                            {ticket.resolicitudes_historial.map((ins, idx) => (
+                                                <View key={ins.id ?? idx} style={styles.insistenciaItemRow}>
+                                                    <Text style={styles.insistenciaItemIndex}>#{idx + 1}</Text>
+                                                    <View style={{ flex: 1 }}>
+                                                        <Text style={styles.dangerAlertText}>
+                                                            {ins.motivo ? `"${ins.motivo}"` : 'Sin comentario'}
+                                                        </Text>
+                                                        {ins.fecha ? (
+                                                            <Text style={styles.insistenciaItemFecha}>
+                                                                {formatearFechaHora(ins.fecha)}
+                                                            </Text>
+                                                        ) : null}
+                                                    </View>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    ) : ticket.ultima_resolicitud_motivo ? (
                                         <Text style={styles.dangerAlertText}>
                                             "{ticket.ultima_resolicitud_motivo}"
                                         </Text>
@@ -1078,7 +1123,20 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                     })}
                                 </View>
 
-                                <Text style={styles.inputMiniLabel}>2. Selecciona al técnico disponible:</Text>
+                                <Text style={styles.inputMiniLabel}>2. Indicaciones para el técnico (opcional):</Text>
+                                <TextInput
+                                    style={[styles.textInputArea, styles.operatorInstructionsInput]}
+                                    placeholder="Describe cómo ingresar al sistema o agrega datos de acceso temporales necesarios para atender el soporte..."
+                                    placeholderTextColor="#94a3b8"
+                                    value={instruccionesTecnico}
+                                    onChangeText={setInstruccionesTecnico}
+                                    multiline
+                                    maxLength={1000}
+                                    textAlignVertical="top"
+                                />
+                                <Text style={styles.instructionsHelperText}>Estas indicaciones solo se mostrarán al técnico asignado.</Text>
+
+                                <Text style={styles.inputMiniLabel}>3. Selecciona al técnico disponible:</Text>
                                 {tecnicos.length === 0 ? (
                                     <ActivityIndicator color={theme.colors.primary} style={{ marginVertical: 14 }} />
                                 ) : (
@@ -1145,7 +1203,20 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                     multiline
                                 />
 
-                                <Text style={styles.inputMiniLabel}>2. Nivel de prioridad:</Text>
+                                <Text style={styles.inputMiniLabel}>2. Indicaciones para el nuevo técnico (opcional):</Text>
+                                <TextInput
+                                    style={[styles.textInputArea, styles.operatorInstructionsInput]}
+                                    placeholder="Agrega instrucciones de acceso o datos temporales que el nuevo técnico necesite..."
+                                    placeholderTextColor="#94a3b8"
+                                    value={instruccionesTecnico}
+                                    onChangeText={setInstruccionesTecnico}
+                                    multiline
+                                    maxLength={1000}
+                                    textAlignVertical="top"
+                                />
+                                <Text style={styles.instructionsHelperText}>Si lo dejas vacío, se conservarán las indicaciones existentes.</Text>
+
+                                <Text style={styles.inputMiniLabel}>3. Nivel de prioridad:</Text>
                                 <View style={styles.priorityGrid}>
                                     {NIVELES_PRIORIDAD.map((p) => {
                                         const activo = prioridad === p.valor;
@@ -1167,7 +1238,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                     })}
                                 </View>
 
-                                <Text style={styles.inputMiniLabel}>3. Nuevo técnico disponible:</Text>
+                                <Text style={styles.inputMiniLabel}>4. Nuevo técnico disponible:</Text>
                                 <View style={{ marginBottom: 12 }}>
                                     {tecnicos.map((tec) => {
                                         const esActual = ticket.nombre_tecnico && tec.nombre === ticket.nombre_tecnico;
@@ -1581,44 +1652,155 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
 
             {/* MODAL: HISTORIAL DE TÉCNICOS Y CRONÓMETROS */}
             <Modal
-                animationType="slide"
+                animationType="fade"
                 transparent
                 visible={modalHistorialTecnicosVisible}
                 onRequestClose={() => setModalHistorialTecnicosVisible(false)}
             >
                 <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
+                    <View style={[styles.modalContent, { maxWidth: 560, padding: 20 }]}>
                         <View style={styles.historyModalHeader}>
-                            <Text style={styles.modalTitle}>Técnicos involucrados</Text>
-                            <TouchableOpacity onPress={() => setModalHistorialTecnicosVisible(false)}>
-                                <AppIcon name="close" size={18} color="#64748b" />
+                            <View style={styles.historyModalHeaderLeft}>
+                                <View style={styles.historyHeaderIconBadge}>
+                                    <AppIcon name="users" size={18} color="#164a96" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.historyModalTitle}>Técnicos involucrados</Text>
+                                    <Text style={styles.historyModalSubtitle}>
+                                        {historialTecnicos.length} {historialTecnicos.length === 1 ? 'etapa registrada' : 'etapas registradas'}
+                                    </Text>
+                                </View>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.historyCloseBtn}
+                                onPress={() => setModalHistorialTecnicosVisible(false)}
+                                activeOpacity={0.75}
+                            >
+                                <AppIcon name="close" size={16} color="#475569" />
                             </TouchableOpacity>
                         </View>
-                        <ScrollView style={{ maxHeight: 440 }}>
-                            {historialTecnicos.map((etapa, index) => (
-                                <View key={etapa.id_asignacion || index} style={styles.technicianHistoryCard}>
-                                    <Text style={styles.technicianHistoryTitle}>Paso {index + 1} · {etapa.tipo_movimiento || 'MOVIMIENTO HISTÓRICO'}</Text>
-                                    <Text style={styles.technicianHistoryLine}>
-                                        Flujo: {etapa.nombre_actor || 'Actor no identificado'} ({etapa.rol_actor || 'ROL NO REGISTRADO'}) → {etapa.fecha_asignacion ? `${etapa.nombre_tecnico || 'Técnico'} (TÉCNICO)` : `${etapa.nombre_destino || 'Técnico receptor'} (TÉCNICO)`}
-                                    </Text>
-                                    <Text style={styles.technicianHistoryLine}>Asignado: {etapa.fecha_asignacion ? formatearFechaHora(etapa.fecha_asignacion) : 'No registrada en el historial anterior'}</Text>
-                                    <Text style={styles.technicianHistoryLine}>Tiempo asignado: {etapa.segundos_desde_asignacion === null ? 'No disponible en el registro anterior' : formatearSegundos(Number(etapa.segundos_desde_asignacion || 0))}</Text>
-                                    <Text style={styles.technicianHistoryLine}>Proceso: {etapa.fecha_inicio ? formatearFechaHora(etapa.fecha_inicio) : 'No iniciado'}</Text>
-                                    <Text style={styles.technicianHistoryLine}>Tiempo en proceso: {etapa.segundos_en_proceso === null ? (etapa.fecha_asignacion ? 'No iniciado' : 'No disponible en el registro anterior') : formatearSegundos(Number(etapa.segundos_en_proceso || 0))}</Text>
-                                    {etapa.fecha_derivacion && etapa.nombre_destino ? (
-                                        <Text style={styles.technicianHistoryLine}>
-                                            Siguiente paso: {etapa.nombre_tecnico || 'Técnico'} (TÉCNICO) → {etapa.nombre_destino} (TÉCNICO) · {etapa.rol_derivacion === 'OPERADOR' ? 'Reasignado por OPERADOR' : etapa.rol_derivacion === 'TECNICO' ? 'Derivado por TÉCNICO' : 'Rol de derivación no registrado'} · {formatearFechaHora(etapa.fecha_derivacion)}
-                                        </Text>
-                                    ) : null}
-                                    {etapa.motivo_derivacion ? (
-                                        <Text style={styles.technicianHistoryReason}>Motivo del siguiente paso: {etapa.motivo_derivacion}</Text>
-                                    ) : etapa.motivo_entrada ? (
-                                        <Text style={styles.technicianHistoryReason}>Motivo registrado: {etapa.motivo_entrada}</Text>
-                                    ) : null}
-                                </View>
-                            ))}
-                            {historialTecnicos.length === 0 && <Text style={styles.emptyItemsText}>No se encontró el historial de asignaciones.</Text>}
+
+                        <ScrollView style={{ maxHeight: 460 }} showsVerticalScrollIndicator={true}>
+                            {historialTecnicos.map((etapa, index) => {
+                                const esUltimo = index === historialTecnicos.length - 1;
+                                const tipoMov = String(etapa.tipo_movimiento || 'MOVIMIENTO HISTÓRICO').toUpperCase();
+                                const esDerivacion = tipoMov.includes('DERIV');
+                                const esReasignacion = tipoMov.includes('REASIG');
+                                const badgeBg = esDerivacion ? '#fef3c7' : esReasignacion ? '#f3e8ff' : '#dbeafe';
+                                const badgeColor = esDerivacion ? '#b45309' : esReasignacion ? '#6d28d9' : '#1d4ed8';
+                                const nombreDestino = etapa.fecha_asignacion
+                                    ? `${etapa.nombre_tecnico || 'Técnico'} (TÉCNICO)`
+                                    : `${etapa.nombre_destino || 'Técnico receptor'} (TÉCNICO)`;
+
+                                return (
+                                    <View key={etapa.id_asignacion || index} style={styles.timelineRow}>
+                                        <View style={styles.timelineTrackCol}>
+                                            <View style={[styles.timelineStepCircle, esUltimo && styles.timelineStepCircleActive]}>
+                                                <Text style={[styles.timelineStepNum, esUltimo && styles.timelineStepNumActive]}>
+                                                    {index + 1}
+                                                </Text>
+                                            </View>
+                                            {!esUltimo && <View style={styles.timelineConnector} />}
+                                        </View>
+
+                                        <View style={styles.technicianHistoryCard}>
+                                            <View style={styles.historyCardTopRow}>
+                                                <View style={[styles.historyTypeBadge, { backgroundColor: badgeBg }]}>
+                                                    <Text style={[styles.historyTypeBadgeText, { color: badgeColor }]}>
+                                                        {tipoMov}
+                                                    </Text>
+                                                </View>
+                                                <Text style={styles.historyStepTag}>Paso {index + 1}</Text>
+                                            </View>
+
+                                            <View style={styles.historyFlowBox}>
+                                                <View style={styles.historyFlowLine}>
+                                                    <Text style={styles.historyFlowLabel}>De:</Text>
+                                                    <Text style={styles.historyFlowValue}>
+                                                        {etapa.nombre_actor || 'Actor no identificado'}{' '}
+                                                        <Text style={styles.historyFlowRole}>({etapa.rol_actor || 'ROL'})</Text>
+                                                    </Text>
+                                                </View>
+                                                <View style={styles.historyFlowLine}>
+                                                    <Text style={styles.historyFlowLabel}>Para:</Text>
+                                                    <Text style={[styles.historyFlowValue, { color: '#164a96' }]}>
+                                                        {nombreDestino}
+                                                    </Text>
+                                                </View>
+                                            </View>
+
+                                            <View style={styles.historyMetricsRow}>
+                                                <View style={styles.historyMetricCard}>
+                                                    <View style={styles.historyMetricHeader}>
+                                                        <AppIcon name="clock" size={12} color="#1d4ed8" />
+                                                        <Text style={styles.techMetricLabel}>TIEMPO ASIGNADO</Text>
+                                                    </View>
+                                                    <Text style={styles.techMetricValue}>
+                                                        {etapa.segundos_desde_asignacion === null
+                                                            ? 'No disponible'
+                                                            : formatearSegundos(Number(etapa.segundos_desde_asignacion || 0))}
+                                                    </Text>
+                                                    <Text style={styles.historyMetricDate}>
+                                                        {etapa.fecha_asignacion ? formatearFechaHora(etapa.fecha_asignacion) : 'Sin registro'}
+                                                    </Text>
+                                                </View>
+
+                                                <View style={[styles.historyMetricCard, { backgroundColor: '#faf5ff', borderColor: '#e9d5ff' }]}>
+                                                    <View style={styles.historyMetricHeader}>
+                                                        <AppIcon name="wrench" size={12} color="#6d28d9" />
+                                                        <Text style={[styles.techMetricLabel, { color: '#6d28d9' }]}>EN PROCESO</Text>
+                                                    </View>
+                                                    <Text style={[styles.techMetricValue, { color: '#4c1d95' }]}>
+                                                        {etapa.segundos_en_proceso === null
+                                                            ? (etapa.fecha_asignacion ? 'No iniciado' : 'No disponible')
+                                                            : formatearSegundos(Number(etapa.segundos_en_proceso || 0))}
+                                                    </Text>
+                                                    <Text style={styles.historyMetricDate}>
+                                                        {etapa.fecha_inicio ? formatearFechaHora(etapa.fecha_inicio) : 'Sin inicio'}
+                                                    </Text>
+                                                </View>
+                                            </View>
+
+                                            {etapa.fecha_derivacion && etapa.nombre_destino ? (
+                                                <View style={styles.historyHandoffRow}>
+                                                    <AppIcon name="refresh" size={12} color="#475569" />
+                                                    <Text style={styles.historyHandoffText}>
+                                                        {etapa.rol_derivacion === 'OPERADOR'
+                                                            ? 'Reasignado por OPERADOR'
+                                                            : etapa.rol_derivacion === 'TECNICO'
+                                                                ? 'Derivado por TÉCNICO'
+                                                                : 'Transferido'}{' '}
+                                                        a <Text style={{ fontWeight: '700', color: '#0f172a' }}>{etapa.nombre_destino}</Text> · {formatearFechaHora(etapa.fecha_derivacion)}
+                                                    </Text>
+                                                </View>
+                                            ) : null}
+
+                                            {(etapa.motivo_derivacion || etapa.motivo_entrada) ? (
+                                                <View style={styles.historyReasonBox}>
+                                                    <AppIcon name="alert" size={12} color="#b45309" />
+                                                    <Text style={styles.technicianHistoryReason}>
+                                                        {etapa.motivo_derivacion
+                                                            ? `Motivo: ${etapa.motivo_derivacion}`
+                                                            : `Motivo registrado: ${etapa.motivo_entrada}`}
+                                                    </Text>
+                                                </View>
+                                            ) : null}
+                                        </View>
+                                    </View>
+                                );
+                            })}
+                            {historialTecnicos.length === 0 && (
+                                <Text style={styles.emptyItemsText}>No se encontró el historial de asignaciones.</Text>
+                            )}
                         </ScrollView>
+
+                        <TouchableOpacity
+                            style={styles.historyFooterCloseBtn}
+                            onPress={() => setModalHistorialTecnicosVisible(false)}
+                            activeOpacity={0.85}
+                        >
+                            <Text style={styles.historyFooterCloseText}>Cerrar</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
@@ -2049,13 +2231,281 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         marginTop: 2,
     },
-    viewTechnicianHistoryButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', marginTop: 8, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 8, backgroundColor: '#eef4ff' },
-    viewTechnicianHistoryText: { marginLeft: 6, color: '#1d5bbf', fontSize: 12, fontWeight: '600' },
-    historyModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-    technicianHistoryCard: { padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#f8fafc', marginBottom: 9 },
-    technicianHistoryTitle: { color: '#0f294a', fontSize: 14, fontWeight: '700', marginBottom: 6 },
-    technicianHistoryLine: { color: '#475569', fontSize: 12, marginTop: 3 },
-    technicianHistoryReason: { color: '#c2410c', fontSize: 12, fontWeight: '600', marginTop: 7 },
+    operatorInstructionsBox: {
+        backgroundColor: '#eff6ff',
+        borderWidth: 1,
+        borderColor: '#bfdbfe',
+        borderRadius: 12,
+        padding: 12,
+        marginTop: 10,
+    },
+    operatorInstructionsHeading: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 6,
+    },
+    operatorInstructionsTitle: {
+        color: '#1e40af',
+        fontSize: 13,
+        fontWeight: '700',
+        marginLeft: 6,
+    },
+    operatorInstructionsText: {
+        color: '#1e293b',
+        fontSize: 13,
+        lineHeight: 19,
+    },
+    operatorInstructionsInput: {
+        minHeight: 88,
+        marginBottom: 4,
+    },
+    instructionsHelperText: {
+        color: '#64748b',
+        fontSize: 12,
+        marginBottom: 14,
+    },
+    viewTechnicianHistoryButton: {
+        width: '100%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 8,
+        paddingVertical: 13,
+        paddingHorizontal: 12,
+        borderRadius: 10,
+        backgroundColor: '#eff6ff',
+        borderWidth: 1,
+        borderColor: '#bfdbfe',
+    },
+    viewTechnicianHistoryText: {
+        marginLeft: 8,
+        color: '#1d5bbf',
+        fontSize: 13.5,
+        fontWeight: '700',
+    },
+    historyModalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 14,
+        paddingBottom: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e2e8f0',
+    },
+    historyModalHeaderLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+        marginRight: 10,
+    },
+    historyHeaderIconBadge: {
+        width: 38,
+        height: 38,
+        borderRadius: 11,
+        backgroundColor: '#eff6ff',
+        borderWidth: 1,
+        borderColor: '#bfdbfe',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 10,
+    },
+    historyModalTitle: {
+        fontSize: 17,
+        fontWeight: 'bold',
+        color: '#0f294a',
+    },
+    historyModalSubtitle: {
+        fontSize: 12,
+        color: '#64748b',
+        marginTop: 1,
+    },
+    historyCloseBtn: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        backgroundColor: '#f1f5f9',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    timelineRow: {
+        flexDirection: 'row',
+        alignItems: 'stretch',
+    },
+    timelineTrackCol: {
+        width: 28,
+        alignItems: 'center',
+        marginRight: 8,
+    },
+    timelineStepCircle: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: '#e2e8f0',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginTop: 10,
+    },
+    timelineStepCircleActive: {
+        backgroundColor: '#164a96',
+    },
+    timelineStepNum: {
+        fontSize: 11,
+        fontWeight: 'bold',
+        color: '#475569',
+    },
+    timelineStepNumActive: {
+        color: '#ffffff',
+    },
+    timelineConnector: {
+        width: 2,
+        flex: 1,
+        backgroundColor: '#cbd5e1',
+        marginVertical: 4,
+    },
+    technicianHistoryCard: {
+        flex: 1,
+        padding: 13,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+        backgroundColor: '#ffffff',
+        marginBottom: 12,
+        shadowColor: '#0f172a',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.04,
+        shadowRadius: 4,
+        elevation: 1,
+    },
+    historyCardTopRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 8,
+        gap: 8,
+    },
+    historyTypeBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 6,
+    },
+    historyTypeBadgeText: {
+        fontSize: 10.5,
+        fontWeight: '800',
+        letterSpacing: 0.3,
+    },
+    historyStepTag: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: '#64748b',
+    },
+    historyFlowBox: {
+        backgroundColor: '#f8fafc',
+        borderRadius: 8,
+        padding: 9,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+        marginBottom: 9,
+        gap: 4,
+    },
+    historyFlowLine: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 6,
+    },
+    historyFlowLabel: {
+        fontSize: 11.5,
+        fontWeight: '700',
+        color: '#64748b',
+        width: 34,
+    },
+    historyFlowValue: {
+        flex: 1,
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#0f172a',
+    },
+    historyFlowRole: {
+        fontSize: 11,
+        fontWeight: '500',
+        color: '#64748b',
+    },
+    historyMetricsRow: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    historyMetricCard: {
+        flex: 1,
+        backgroundColor: '#eff6ff',
+        borderWidth: 1,
+        borderColor: '#dbeafe',
+        borderRadius: 8,
+        padding: 8,
+    },
+    historyMetricHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginBottom: 3,
+    },
+    techMetricLabel: {
+        fontSize: 9.5,
+        fontWeight: '800',
+        color: '#1d4ed8',
+        letterSpacing: 0.3,
+    },
+    techMetricValue: {
+        fontSize: 13.5,
+        fontWeight: '800',
+        color: '#0f294a',
+    },
+    historyMetricDate: {
+        fontSize: 10.5,
+        color: '#64748b',
+        marginTop: 2,
+    },
+    historyHandoffRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 6,
+        marginTop: 9,
+        paddingTop: 8,
+        borderTopWidth: 1,
+        borderTopColor: '#f1f5f9',
+    },
+    historyHandoffText: {
+        flex: 1,
+        fontSize: 11.5,
+        color: '#475569',
+        lineHeight: 16,
+    },
+    historyReasonBox: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 6,
+        marginTop: 8,
+        backgroundColor: '#fffbeb',
+        borderRadius: 8,
+        padding: 8,
+        borderLeftWidth: 3,
+        borderLeftColor: '#f59e0b',
+    },
+    technicianHistoryReason: {
+        flex: 1,
+        color: '#92400e',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    historyFooterCloseBtn: {
+        marginTop: 10,
+        backgroundColor: '#164a96',
+        borderRadius: 10,
+        paddingVertical: 11,
+        alignItems: 'center',
+    },
+    historyFooterCloseText: {
+        color: '#ffffff',
+        fontSize: 13.5,
+        fontWeight: '700',
+    },
     warningAlertBox: {
         backgroundColor: '#fff8e1',
         borderRadius: 8,
@@ -2094,6 +2544,33 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#922b21',
         marginTop: 2,
+    },
+    insistenciaLista: {
+        marginTop: 6,
+        gap: 6,
+    },
+    insistenciaItemRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 6,
+        paddingTop: 5,
+        borderTopWidth: 1,
+        borderTopColor: '#f5b7b1',
+    },
+    insistenciaItemIndex: {
+        fontSize: 11,
+        fontWeight: 'bold',
+        color: '#b91c1c',
+        backgroundColor: '#fadbd8',
+        paddingHorizontal: 6,
+        paddingVertical: 1,
+        borderRadius: 6,
+        marginTop: 1,
+    },
+    insistenciaItemFecha: {
+        fontSize: 11,
+        color: '#c0392b',
+        marginTop: 1,
     },
 
     // ACCIONES

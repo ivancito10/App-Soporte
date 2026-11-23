@@ -79,8 +79,8 @@ export const resolicitarSoporte = async (idSolicitud: number, motivo?: string) =
 };
 
 // 4. Asignar técnico (Operador) con nivel de prioridad
-export const asignarSoporte = async (idSolicitud: number, idTecnico: number, prioridad: string = 'MEDIA') => {
-    const response = await api.post('/soportes/asignar', { idSolicitud, idTecnico, prioridad });
+export const asignarSoporte = async (idSolicitud: number, idTecnico: number, prioridad: string = 'MEDIA', instruccionesTecnico?: string) => {
+    const response = await api.post('/soportes/asignar', { idSolicitud, idTecnico, prioridad, instruccionesTecnico });
     return response.data;
 };
 
@@ -193,11 +193,12 @@ export const registrarLlegadaTecnico = async (idAsignacion: number, latitud: num
 };
 
 // 7. Operador reasigna el ticket a otro técnico con justificación y prioridad
-export const reasignarSoporteOperador = async (idSolicitud: number, idTecnico: number, justificacion: string, prioridad?: string) => {
+export const reasignarSoporteOperador = async (idSolicitud: number, idTecnico: number, justificacion: string, prioridad?: string, instruccionesTecnico?: string) => {
     const response = await api.post(`/soportes/solicitud/${idSolicitud}/reasignar-operador`, {
         idTecnico,
         justificacion,
         prioridad,
+        instruccionesTecnico,
     });
     return response.data;
 };

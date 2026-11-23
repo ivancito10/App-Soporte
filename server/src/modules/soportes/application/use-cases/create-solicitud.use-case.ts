@@ -18,15 +18,20 @@ export class CreateSolicitudUseCase {
     // CORRECCIÓN 3: Renombrar a crearSolicitudTransaccional
     const nuevaSolicitud = await this.soporteRepository.crearSolicitudTransaccional(idUsuario, dto);
 
-    // 4. Enviar Notificación Push a los Operadores activos
+    // 4. Enviar Notificación Push + Campanita a los Operadores activos
     try {
-      const tokensOperadores = await this.soporteRepository.obtenerTokensOperadoresActivos();
-      if (tokensOperadores && tokensOperadores.length > 0) {
+      const idsOperadores = await this.soporteRepository.obtenerIdsOperadoresActivos();
+      if (idsOperadores && idsOperadores.length > 0) {
+        const ubicacionTexto = [dto.oficina, dto.consultorio, dto.piso].filter(Boolean).join(' — ') || 'ubicación registrada';
         await this.notificationService.enviarNotificacion(
-          tokensOperadores,
+          idsOperadores,
           'Nueva Solicitud de Soporte',
-          `El usuario #${idUsuario} ha solicitado soporte en ${dto.oficina}.`,
-          { idSolicitud: nuevaSolicitud.id?.toString() }
+          `Se registró el ticket ${nuevaSolicitud.codigoTicket || `#${nuevaSolicitud.id}`} en ${ubicacionTexto}.`,
+          {
+            idSolicitud: String(nuevaSolicitud.id ?? ''),
+            codigoTicket: String(nuevaSolicitud.codigoTicket ?? ''),
+            tipoNotificacion: 'NUEVA_SOLICITUD_OPERADOR',
+          }
         );
       }
     } catch (error) {

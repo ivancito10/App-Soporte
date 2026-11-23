@@ -8,7 +8,7 @@ export const login = async (usuario: string, contrasena: string) => {
     const response = await api.post('/auth/login', {
         username: usuario,
         password: contrasena
-    });
+    }, { timeout: 15000 });
 
     // Extraemos el token ya sea que venga como access_token o token
     const token = response.data?.accessToken;

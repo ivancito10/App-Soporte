@@ -28,10 +28,11 @@ export class ReasignarSoporteUseCase {
       await this.notificationService.enviarNotificacion(
         Number(dto.id_a_soporte),
         'Soporte derivado',
-        `Te derivaron el ticket #${resultado.idSolicitud}. Cambia al modo TÉCNICO para atenderlo.`,
+        `Te derivaron el ticket ${resultado.codigoTicket || `#${resultado.idSolicitud}`}. Cambia al modo TÉCNICO para atenderlo.`,
         {
           idAsignacion: String(resultado.idAsignacion ?? ''),
           idSolicitud: String(resultado.idSolicitud ?? ''),
+          codigoTicket: String(resultado.codigoTicket ?? ''),
           rolDestino: 'TECNICO',
           tipoNotificacion: 'ASIGNACION_TECNICO',
         },

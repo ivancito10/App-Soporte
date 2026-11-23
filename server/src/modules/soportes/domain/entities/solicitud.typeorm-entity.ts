@@ -5,6 +5,9 @@ export class SolicitudTypeOrmEntity {
     @PrimaryGeneratedColumn()
     id: number;
 
+    @Column({ name: 'codigo_ticket', type: 'varchar', length: 24, unique: true })
+    codigoTicket: string;
+
     @Column({ name: 'id_usuario', type: 'bigint' })
     idUsuario: number;
 

@@ -22,10 +22,11 @@ export class AsignarSoporteUseCase {
         await this.notificationService.enviarNotificacion(
           idSoporte,
           'Nuevo Ticket Asignado',
-          `Te asignaron el ticket #${asignacion.idSolicitud ?? dto.idSolicitud}. Cambia al modo TÉCNICO para atenderlo.`,
+          `Te asignaron el ticket ${asignacion.codigoTicket || `#${asignacion.idSolicitud ?? dto.idSolicitud}`}. Cambia al modo TÉCNICO para atenderlo.`,
           {
             idAsignacion: String(asignacion.idAsignacion ?? asignacion.id ?? ''),
             idSolicitud: String(asignacion.idSolicitud ?? dto.idSolicitud ?? ''),
+            codigoTicket: String(asignacion.codigoTicket ?? ''),
             rolDestino: 'TECNICO',
             tipoNotificacion: 'ASIGNACION_TECNICO',
           }

@@ -276,11 +276,13 @@ export const GestionRolesScreen = ({
         const nombre = (u.nombre_completo || '').toLowerCase();
         const user = (u.username || '').toLowerCase();
         const ci = (u.ci || '').toLowerCase();
+        const email = (u.email || '').toLowerCase();
         const rolesTexto = obtenerRolesDeUsuario(u).join(' ').toLowerCase() || (u.rol_soporte || '').toLowerCase();
         return (
             nombre.includes(termino) ||
             user.includes(termino) ||
             ci.includes(termino) ||
+            email.includes(termino) ||
             rolesTexto.includes(termino)
         );
     });
@@ -571,7 +573,7 @@ export const GestionRolesScreen = ({
                     </View>
                     <TextInput
                         style={styles.searchInput}
-                        placeholder="Buscar funcionario por nombre, usuario, CI o rol..."
+                        placeholder="Buscar por nombre, usuario, email, CI o rol..."
                         placeholderTextColor="#94a3b8"
                         value={busqueda}
                         onChangeText={setBusqueda}
@@ -769,6 +771,11 @@ export const GestionRolesScreen = ({
                                         Usuario: {usuarioSeleccionado.username}
                                         {usuarioSeleccionado.ci ? ` | CI: ${usuarioSeleccionado.ci}` : ''}
                                     </Text>
+                                    {Boolean(usuarioSeleccionado.email) && (
+                                        <Text style={styles.selectedUserSub}>
+                                            Email: {usuarioSeleccionado.email}
+                                        </Text>
+                                    )}
                                     <Text style={styles.selectedUserCurrentRole}>
                                         Rol actual:{' '}
                                         <Text style={{ fontWeight: 'bold', color: theme.colors.primary }}>

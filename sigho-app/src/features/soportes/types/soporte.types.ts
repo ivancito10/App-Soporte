@@ -37,11 +37,14 @@ export interface CrearSolicitudPayload {
 export interface TicketSoporte {
     id?: number;
     id_solicitud: number;
+    codigo_ticket?: string;
     id_asignacion?: number; // Viene en la bandeja de técnico/administrador
+    instrucciones_tecnico?: string | null;
     fecha_solicitud?: string;
     fecha_asignacion?: string;
     fecha_primera_asignacion?: string;
     segundos_hasta_asignacion?: number | null;
+    segundos_sin_asignar?: number | null;
     piso: string;
     oficina: string;
     consultorio?: string;
@@ -50,11 +53,17 @@ export interface TicketSoporte {
     solicitante_manual?: string | null;
     nombre_usuario?: string;
     username?: string;
+    ci_usuario?: string;
 
     // Alertas (Operador)
     cantidad_resolicitudes?: number;
     ultima_resolicitud?: string;
     ultima_resolicitud_motivo?: string;
+    resolicitudes_historial?: Array<{
+        id: number;
+        motivo?: string | null;
+        fecha?: string | null;
+    }>;
 
     // Métricas (Administrador)
     minutos_atencion?: number;

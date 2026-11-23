@@ -764,6 +764,30 @@ export const CrearSolicitudScreen = () => {
                                 })}
                             </View>
 
+                            <View style={styles.problemImageBox}>
+                                <Text style={styles.inputLabel}>Imagen del problema <Text style={styles.optionalTag}>(Opcional)</Text></Text>
+                                <Text style={styles.problemImageHint}>Puedes elegir una imagen de la galería o tomar una foto (máximo 5 MB).</Text>
+                                <View style={styles.problemImageActions}>
+                                    <TouchableOpacity style={styles.problemImageButton} onPress={() => seleccionarImagenProblema(false)} disabled={isLoading}>
+                                        <AppIcon name="folder" size={15} color="#1d5bbf" />
+                                        <Text style={styles.problemImageButtonText}>Galería</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={styles.problemImageButton} onPress={() => seleccionarImagenProblema(true)} disabled={isLoading}>
+                                        <AppIcon name="camera" size={15} color="#1d5bbf" />
+                                        <Text style={styles.problemImageButtonText}>Tomar foto</Text>
+                                    </TouchableOpacity>
+                                </View>
+                                {imagenProblemaUri && (
+                                    <View style={styles.problemImagePreviewRow}>
+                                        <Image source={{ uri: imagenProblemaUri }} style={styles.problemImagePreview} />
+                                        <Text style={styles.problemImageSelected}>Imagen lista para adjuntar</Text>
+                                        <TouchableOpacity onPress={() => setImagenProblemaUri(null)} style={{ padding: 8 }}>
+                                            <AppIcon name="close" size={16} color="#64748b" />
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+                            </View>
+
                             {/* DESCRIPCIÓN DETALLADA CON CONTADOR Y AUTO-SCROLL AL ENFOCAR */}
                             <View style={styles.inputGroup}>
                                 <Text style={styles.inputLabel}>
@@ -814,29 +838,6 @@ export const CrearSolicitudScreen = () => {
                                     <View style={styles.errorHelperRow}>
                                         <AppIcon name="alert" size={13} color="#dc2626" />
                                         <Text style={styles.errorTextHelper}>{errores.descripcion}</Text>
-                                    </View>
-                                )}
-                            </View>
-                            <View style={styles.problemImageBox}>
-                                <Text style={styles.inputLabel}>Imagen del problema <Text style={styles.optionalTag}>(Opcional)</Text></Text>
-                                <Text style={styles.problemImageHint}>Puedes elegir una imagen de la galería o tomar una foto (máximo 5 MB).</Text>
-                                <View style={styles.problemImageActions}>
-                                    <TouchableOpacity style={styles.problemImageButton} onPress={() => seleccionarImagenProblema(false)} disabled={isLoading}>
-                                        <AppIcon name="folder" size={15} color="#1d5bbf" />
-                                        <Text style={styles.problemImageButtonText}>Galería</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity style={styles.problemImageButton} onPress={() => seleccionarImagenProblema(true)} disabled={isLoading}>
-                                        <AppIcon name="camera" size={15} color="#1d5bbf" />
-                                        <Text style={styles.problemImageButtonText}>Tomar foto</Text>
-                                    </TouchableOpacity>
-                                </View>
-                                {imagenProblemaUri && (
-                                    <View style={styles.problemImagePreviewRow}>
-                                        <Image source={{ uri: imagenProblemaUri }} style={styles.problemImagePreview} />
-                                        <Text style={styles.problemImageSelected}>Imagen lista para adjuntar</Text>
-                                        <TouchableOpacity onPress={() => setImagenProblemaUri(null)} style={{ padding: 8 }}>
-                                            <AppIcon name="close" size={16} color="#64748b" />
-                                        </TouchableOpacity>
                                     </View>
                                 )}
                             </View>
@@ -1336,7 +1337,7 @@ const styles = StyleSheet.create({
     supportOptionsHeader: { flexDirection: 'row', alignItems: 'center' },
     supportOptionSummary: { fontSize: 12, color: '#1d5bbf', fontWeight: '600', marginTop: -4, marginBottom: 5 },
     supportOptionsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
-    problemImageBox: { marginTop: 4, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#f8fafc' },
+    problemImageBox: { marginTop: 4, marginBottom: 18, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#f8fafc' },
     problemImageHint: { color: '#64748b', fontSize: 12, marginTop: -4, marginBottom: 10 },
     problemImageActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     problemImageButton: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 9, borderRadius: 9, backgroundColor: '#eef4ff' },
