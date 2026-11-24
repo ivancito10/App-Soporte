@@ -14,7 +14,7 @@ export class LoginUseCase {
         @InjectDataSource('sighov') private readonly dataSource: DataSource, // <-- AÑADIR DECORADOR AQUÍ
     ) { }
 
-    async ejecutar(dto: LoginDto) {
+    async ejecutar(dto: LoginDto, plataforma?: string) {
         const user = await this.userRepo.buscarPorCredencial(dto.username);
 
         if (!user || !user.estaActivo()) {
@@ -76,8 +76,11 @@ export class LoginUseCase {
             rolesSoporte: rolesSoporte,
         };
 
+        const plataformaCliente = (plataforma ?? dto.plataforma)?.trim().toLowerCase();
+        const expiresIn = plataformaCliente === 'mobile' ? '30d' : '8h';
+
         return {
-            accessToken: this.jwtService.sign(payload),
+            accessToken: this.jwtService.sign(payload, { expiresIn }),
             tokenType: 'Bearer',
             usuario: {
                 id: user.id,

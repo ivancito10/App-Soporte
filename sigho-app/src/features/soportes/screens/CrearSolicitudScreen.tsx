@@ -20,6 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { guardarItem, obtenerItem } from '../../../core/utils/storage';
 import { AppIcon, NombreIcono } from '../../../core/components/AppIcon';
+import { AppAlert } from '../../../core/components/AlertaGlobalModal';
 import { useCrearSolicitud } from '../hooks/useCrearSolicitud';
 import { CrearSolicitudPayload } from '../types/soporte.types';
 import { obtenerSedes, obtenerConsultoriosPorSede } from '../api/soporte.service';
@@ -273,11 +274,7 @@ export const CrearSolicitudScreen = () => {
             setErrores(nuevosErrores);
             setMensajeAlerta('Por favor completa todos los campos obligatorios marcados en rojo.');
 
-            if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
-                window.alert('⚠️ Faltan datos requeridos:\n\n' + listaMensajes.join('\n'));
-            } else {
-                Alert.alert('Faltan datos', 'Por favor completa los campos marcados en rojo.');
-            }
+            AppAlert.alert('Faltan datos', 'Por favor completa los campos marcados en rojo.');
 
             if (nuevosErrores.piso) {
                 scrollViewRef.current?.scrollTo({ y: 0, animated: true });
@@ -306,11 +303,7 @@ export const CrearSolicitudScreen = () => {
 
         enviarSolicitud(payload, async () => {
             await guardarUbicacionEnHistorial(ubicacionActual);
-            if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
-                window.alert('✅ Tu solicitud de soporte ha sido enviada exitosamente.');
-            } else {
-                Alert.alert('Éxito', 'Tu solicitud de soporte ha sido enviada.');
-            }
+            AppAlert.alert('¡Solicitud Enviada!', 'Tu solicitud de soporte ha sido registrada y está lista para ser atendida.');
             navigation.goBack();
         }, imagenProblemaUri);
     };
@@ -320,13 +313,13 @@ export const CrearSolicitudScreen = () => {
             if (usarCamara) {
                 const permiso = await ImagePicker.requestCameraPermissionsAsync();
                 if (!permiso.granted) {
-                    Alert.alert('Permiso requerido', 'Permite el acceso a la cámara para tomar una foto.');
+                    AppAlert.alert('Permiso requerido', 'Permite el acceso a la cámara para tomar una foto.');
                     return;
                 }
             } else {
                 const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
                 if (!permiso.granted) {
-                    Alert.alert('Permiso requerido', 'Permite el acceso a la galería para elegir una imagen.');
+                    AppAlert.alert('Permiso requerido', 'Permite el acceso a la galería para elegir una imagen.');
                     return;
                 }
             }
@@ -335,7 +328,7 @@ export const CrearSolicitudScreen = () => {
                 : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
             if (!resultado.canceled && resultado.assets?.[0]?.uri) setImagenProblemaUri(resultado.assets[0].uri);
         } catch (error) {
-            Alert.alert('No se pudo abrir la cámara o galería', 'Intenta nuevamente.');
+            AppAlert.alert('No se pudo abrir la cámara o galería', 'Intenta nuevamente.');
         }
     };
 

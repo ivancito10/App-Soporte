@@ -21,6 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { theme } from '../../../core/theme/theme';
 import { AppIcon, NombreIcono } from '../../../core/components/AppIcon';
+import { AppAlert } from '../../../core/components/AlertaGlobalModal';
 import { RolBandeja, TicketSoporte } from '../types/soporte.types';
 import {
     resolicitarSoporte,
@@ -288,7 +289,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             setCalificacionGuardada(guardada || { calificacion });
         } catch (error: any) {
             setCalificacionSeleccionada(null);
-            Alert.alert('No se pudo calificar', error?.response?.data?.message || 'Intenta nuevamente más tarde.');
+            AppAlert.alert('No se pudo calificar', error?.response?.data?.message || 'Intenta nuevamente más tarde.');
         } finally {
             setGuardandoCalificacion(false);
         }
@@ -388,7 +389,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
     // Acciones
     const handleAgregarItem = async () => {
         if (!nuevaDescripcion.trim()) {
-            return Alert.alert('Error', 'Debes describir el problema.');
+            return AppAlert.alert('Error', 'Debes describir el problema.');
         }
 
         setGuardandoItem(true);
@@ -398,7 +399,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                 descripcion: nuevaDescripcion.trim(),
             });
 
-            Alert.alert('Éxito', 'Se añadió el problema a tu ticket.');
+            AppAlert.alert('Éxito', 'Se añadió el problema a tu ticket.');
             setModalVisible(false);
             setNuevaDescripcion('');
 
@@ -407,7 +408,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             setItemsProblema(Array.isArray(itemsRefresh) ? itemsRefresh : []);
             setCargandoItems(false);
         } catch (_error) {
-            Alert.alert('Error', 'No se pudo añadir el problema.');
+            AppAlert.alert('Error', 'No se pudo añadir el problema.');
         } finally {
             setGuardandoItem(false);
         }
@@ -418,11 +419,11 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
         try {
             await resolicitarSoporte(idReal, observacion);
             setObservacion('');
-            Alert.alert('Éxito', 'Tu solicitud de insistencia ha sido enviada.');
+            AppAlert.alert('Éxito', 'Tu solicitud de insistencia ha sido enviada.');
             navigation.goBack();
         } catch (error: any) {
             console.error('Error al resolicitar soporte:', error);
-            Alert.alert('Error', 'No se pudo enviar la solicitud de insistencia.');
+            AppAlert.alert('Error', 'No se pudo enviar la solicitud de insistencia.');
         } finally {
             setCargando(false);
         }
@@ -430,23 +431,19 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
 
     const handleAsignar = async () => {
         if (!idTecnico) {
-            Alert.alert('Atención', 'Por favor selecciona un técnico disponible.');
+            AppAlert.alert('Atención', 'Por favor selecciona un técnico disponible.');
             return;
         }
 
         setCargando(true);
         try {
             await asignarSoporte(Number(idReal), Number(idTecnico), prioridad, instruccionesTecnico.trim() || undefined);
-            Alert.alert('Éxito', `El ticket ha sido asignado al técnico con prioridad ${prioridad}.`);
+            AppAlert.alert('Éxito', `El ticket ha sido asignado al técnico con prioridad ${prioridad}.`);
             navigation.goBack();
         } catch (error: any) {
             console.error('Error al asignar técnico:', error);
             const msg = error?.response?.data?.message || 'No se pudo asignar el técnico al ticket.';
-            if (Platform.OS === 'web' && typeof window !== 'undefined') {
-                window.alert(msg);
-            } else {
-                Alert.alert('No se pudo asignar', msg);
-            }
+            AppAlert.alert('No se pudo asignar', msg);
             if (error?.response?.status === 409) {
                 navigation.goBack();
             }
@@ -457,23 +454,23 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
 
     const handleReasignarOperador = async () => {
         if (!idTecnico) {
-            Alert.alert('Atención', 'Por favor selecciona al nuevo técnico.');
+            AppAlert.alert('Atención', 'Por favor selecciona al nuevo técnico.');
             return;
         }
         if (!justificacionReasignacion.trim()) {
-            Alert.alert('Atención', 'Debes escribir el motivo por el cual estás reasignando.');
+            AppAlert.alert('Atención', 'Debes escribir el motivo por el cual estás reasignando.');
             return;
         }
 
         setCargando(true);
         try {
             await reasignarSoporteOperador(Number(idReal), Number(idTecnico), justificacionReasignacion.trim(), prioridad, instruccionesTecnico.trim() || undefined);
-            Alert.alert('Éxito', 'El ticket fue reasignado al nuevo técnico correctamente.');
+            AppAlert.alert('Éxito', 'El ticket fue reasignado al nuevo técnico correctamente.');
             navigation.goBack();
         } catch (error: any) {
             console.error('Error al reasignar técnico:', error);
             const msg = error?.response?.data?.message || 'No se pudo reasignar el técnico.';
-            Alert.alert('Error', msg);
+            AppAlert.alert('Error', msg);
         } finally {
             setCargando(false);
         }
@@ -486,10 +483,10 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             setEstadoActual('EN_PROCESO');
             setTimestampInicioLocal(Date.now());
             setBaseSegundosInicio(0);
-            Alert.alert('En Proceso', 'Has iniciado la atención del soporte.');
+            AppAlert.alert('En Proceso', 'Has iniciado la atención del soporte.');
         } catch (error: any) {
             console.error('Error al poner en proceso:', error);
-            Alert.alert('Error', 'No se pudo cambiar el estado a En Proceso.');
+            AppAlert.alert('Error', 'No se pudo cambiar el estado a En Proceso.');
         } finally {
             setCargando(false);
         }
@@ -509,7 +506,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
 
     const handleRegistrarEnCamino = async () => {
         if (!ticket.id_asignacion) {
-            Alert.alert('Sin asignación', 'No se encontró la asignación activa de este técnico.');
+            AppAlert.alert('Sin asignación', 'No se encontró la asignación activa de este técnico.');
             return;
         }
         setRegistrandoTrayecto(true);
@@ -517,9 +514,9 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             const coordenadas = await capturarUbicacionActual();
             const datos = await registrarTecnicoEnCamino(Number(ticket.id_asignacion), coordenadas.latitud, coordenadas.longitud);
             setTicket((actual) => ({ ...actual, ...datos }));
-            Alert.alert('Trayecto iniciado', 'Se registró la hora y ubicación GPS de salida.');
+            AppAlert.alert('Trayecto iniciado', 'Se registró la hora y ubicación GPS de salida.');
         } catch (error: any) {
-            Alert.alert('No se pudo registrar', error?.response?.data?.message || error?.message || 'No se pudo obtener la ubicación actual.');
+            AppAlert.alert('No se pudo registrar', error?.response?.data?.message || error?.message || 'No se pudo obtener la ubicación actual.');
         } finally {
             setRegistrandoTrayecto(false);
         }
@@ -527,7 +524,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
 
     const handleRegistrarLlegada = async () => {
         if (!ticket.id_asignacion) {
-            Alert.alert('Sin asignación', 'No se encontró la asignación activa de este técnico.');
+            AppAlert.alert('Sin asignación', 'No se encontró la asignación activa de este técnico.');
             return;
         }
         setRegistrandoTrayecto(true);
@@ -535,9 +532,9 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             const coordenadas = await capturarUbicacionActual();
             const datos = await registrarLlegadaTecnico(Number(ticket.id_asignacion), coordenadas.latitud, coordenadas.longitud);
             setTicket((actual) => ({ ...actual, ...datos }));
-            Alert.alert('Llegada registrada', 'Se guardó la hora y ubicación GPS de llegada.');
+            AppAlert.alert('Llegada registrada', 'Se guardó la hora y ubicación GPS de llegada.');
         } catch (error: any) {
-            Alert.alert('No se pudo registrar', error?.response?.data?.message || error?.message || 'No se pudo obtener la ubicación actual.');
+            AppAlert.alert('No se pudo registrar', error?.response?.data?.message || error?.message || 'No se pudo obtener la ubicación actual.');
         } finally {
             setRegistrandoTrayecto(false);
         }
@@ -546,21 +543,21 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
     const abrirMapa = (latitud?: number | null, longitud?: number | null) => {
         if (latitud === null || longitud === null || latitud === undefined || longitud === undefined) return;
         const url = `https://www.google.com/maps/search/?api=1&query=${latitud},${longitud}`;
-        Linking.openURL(url).catch(() => Alert.alert('No se pudo abrir el mapa', 'Verifica que el dispositivo tenga una aplicación de mapas disponible.'));
+        Linking.openURL(url).catch(() => AppAlert.alert('No se pudo abrir el mapa', 'Verifica que el dispositivo tenga una aplicación de mapas disponible.'));
     };
 
     const handleDerivarTecnico = async () => {
         if (!idNuevoTecnico) {
-            Alert.alert('Atención', 'Debes seleccionar al técnico al que deseas derivar el soporte.');
+            AppAlert.alert('Atención', 'Debes seleccionar al técnico al que deseas derivar el soporte.');
             return;
         }
         if (!motivoDerivacion.trim()) {
-            Alert.alert('Atención', 'La justificación de la derivación es obligatoria.');
+            AppAlert.alert('Atención', 'La justificación de la derivación es obligatoria.');
             return;
         }
         const idAsignacion = ticket.id_asignacion;
         if (!idAsignacion) {
-            Alert.alert('Error', 'No se encontró el identificador de asignación.');
+            AppAlert.alert('Error', 'No se encontró el identificador de asignación.');
             return;
         }
 
@@ -569,12 +566,12 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             await reasignarSoporte(Number(idAsignacion), Number(idNuevoTecnico), motivoDerivacion.trim());
             setModalReasignarVisible(false);
             setMotivoDerivacion('');
-            Alert.alert('Soporte Derivado', 'El soporte ha sido derivado exitosamente.');
+            AppAlert.alert('Soporte Derivado', 'El soporte ha sido derivado exitosamente.');
             navigation.goBack();
         } catch (error: any) {
             console.error('Error al derivar soporte:', error);
             const msg = error?.response?.data?.message || 'No se pudo derivar el soporte.';
-            Alert.alert('Error', msg);
+            AppAlert.alert('Error', msg);
         } finally {
             setGuardandoReasignacion(false);
         }
@@ -585,13 +582,13 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
             if (usarCamara) {
                 const permiso = await ImagePicker.requestCameraPermissionsAsync();
                 if (!permiso.granted) {
-                    Alert.alert('Permiso requerido', 'Permite el acceso a la cámara para tomar la foto del acta.');
+                    AppAlert.alert('Permiso requerido', 'Permite el acceso a la cámara para tomar la foto del acta.');
                     return;
                 }
             } else {
                 const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
                 if (!permiso.granted) {
-                    Alert.alert('Permiso requerido', 'Permite el acceso a la galería para seleccionar la foto del acta.');
+                    AppAlert.alert('Permiso requerido', 'Permite el acceso a la galería para seleccionar la foto del acta.');
                     return;
                 }
             }
@@ -605,34 +602,34 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                 setNombreArchivoActa(asset.fileName || 'acta_soporte.jpg');
             }
         } catch (error) {
-            Alert.alert('Error', usarCamara ? 'No se pudo abrir la cámara.' : 'No se pudo abrir la galería.');
+            AppAlert.alert('Error', usarCamara ? 'No se pudo abrir la cámara.' : 'No se pudo abrir la galería.');
         }
     };
 
     const handleFinalizar = async () => {
         if (!archivoActaUri) {
-            Alert.alert('Acta requerida', 'Debes adjuntar la imagen/foto del Acta de Soporte para finalizar.');
+            AppAlert.alert('Acta requerida', 'Debes adjuntar la imagen/foto del Acta de Soporte para finalizar.');
             return;
         }
         if (!diagnostico.trim()) {
-            Alert.alert('Diagnóstico requerido', 'Debes escribir el diagnóstico u observación del trabajo realizado.');
+            AppAlert.alert('Diagnóstico requerido', 'Debes escribir el diagnóstico u observación del trabajo realizado.');
             return;
         }
         const idAsignacion = ticket.id_asignacion;
         if (!idAsignacion) {
-            Alert.alert('Error', 'No se encontró el ID de asignación.');
+            AppAlert.alert('Error', 'No se encontró el ID de asignación.');
             return;
         }
 
         setCargando(true);
         try {
             await finalizarSoporte(Number(idAsignacion), archivoActaUri, diagnostico.trim());
-            Alert.alert('¡Soporte Finalizado!', 'El acta y el registro del soporte se guardaron correctamente.');
+            AppAlert.alert('¡Soporte Finalizado!', 'El acta y el registro del soporte se guardaron correctamente.');
             navigation.goBack();
         } catch (error: any) {
             console.error('Error al finalizar soporte:', error);
             const msg = error?.response?.data?.message || 'No se pudo finalizar el soporte.';
-            Alert.alert('Error', msg);
+            AppAlert.alert('Error', msg);
         } finally {
             setCargando(false);
         }
@@ -1353,7 +1350,7 @@ export const TicketDetalleScreen = ({ route, navigation }: any) => {
                                         }
                                         const urlCompleta = construirUrlArchivo(ruta);
                                         if (!urlCompleta) {
-                                            Alert.alert('Sin archivo', 'No se encontró un archivo de acta adjunto.');
+                                            AppAlert.alert('Sin archivo', 'No se encontró un archivo de acta adjunto.');
                                             return;
                                         }
                                         const esPdf =

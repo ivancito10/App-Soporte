@@ -7,7 +7,8 @@ export const login = async (usuario: string, contrasena: string) => {
     // Ajusta las llaves 'correo' y 'contrasena' según lo que espere tu AuthController en NestJS
     const response = await api.post('/auth/login', {
         username: usuario,
-        password: contrasena
+        password: contrasena,
+        plataforma: Platform.OS === 'web' ? 'web' : 'mobile',
     }, { timeout: 15000 });
 
     // Extraemos el token ya sea que venga como access_token o token

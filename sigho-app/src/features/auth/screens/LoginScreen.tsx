@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useWindowDimensions, } from 'react-native';
 import { theme } from '../../../core/theme/theme';
+import { AppAlert } from '../../../core/components/AlertaGlobalModal';
 import { guardarItem, obtenerItem, eliminarItem } from '../../../core/utils/storage';
 import { login } from '../api/auth.service';
 import { registrarParaNotificacionesPush } from '../../../core/utils/notifications';
@@ -207,7 +208,7 @@ export const LoginScreen = ({ onLogin, iniciarConContrasena = false }: { onLogin
 
     const handleLogin = async () => {
         if (!usuario || !contrasena) {
-            Alert.alert('Campos vacíos', 'Por favor ingresa tu usuario y contraseña.');
+            AppAlert.alert('Campos vacíos', 'Por favor ingresa tu usuario y contraseña.');
             return;
         }
 
@@ -248,11 +249,7 @@ export const LoginScreen = ({ onLogin, iniciarConContrasena = false }: { onLogin
                     ? 'El servidor no respondió en 15 segundos. Revisa la conexión e intenta nuevamente.'
                     : 'Credenciales incorrectas o error de red');
 
-            if (Platform.OS === 'web') {
-                window.alert('Error: ' + textoFinal);
-            } else {
-                Alert.alert('Error al ingresar', textoFinal);
-            }
+            AppAlert.alert('Error al ingresar', textoFinal);
         } finally {
             setCargando(false);
             setMetodoCargando(null);

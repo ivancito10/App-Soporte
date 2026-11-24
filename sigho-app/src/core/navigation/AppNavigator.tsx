@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { obtenerItem, guardarItem, eliminarItem } from '../utils/storage';
 import { View, ActivityIndicator, Platform, Alert, AppState } from 'react-native';
 import { registrarManejadorSesionExpirada, tokenJwtExpirado } from '../api/axios.config';
+import { AppAlert } from '../components/AlertaGlobalModal';
 import { theme } from '../theme/theme';
 import { LoginScreen } from '../../features/auth/screens/LoginScreen';
 import { vincularTokenFCM } from '../../features/auth/api/auth.service';
@@ -47,11 +48,7 @@ export const AppNavigator = () => {
             const msg = motivo === 'inactividad'
                 ? 'Tu sesión se cerró automáticamente por inactividad (15 minutos).'
                 : 'Tu sesión ha expirado. Por favor inicia sesión nuevamente.';
-            if (Platform.OS === 'web' && typeof window !== 'undefined') {
-                window.alert(msg);
-            } else {
-                Alert.alert('Sesión cerrada', msg);
-            }
+            AppAlert.alert('Sesión cerrada', msg);
         } finally {
             setTimeout(() => {
                 cerrandoSesionRef.current = false;

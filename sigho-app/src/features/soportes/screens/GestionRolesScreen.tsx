@@ -20,6 +20,7 @@ import { theme } from '../../../core/theme/theme';
 import { obtenerItem, guardarItem, eliminarItem } from '../../../core/utils/storage';
 import { MenuLateralModal } from '../../../core/components/MenuLateralModal';
 import { AppIcon, NombreIcono } from '../../../core/components/AppIcon';
+import { AppAlert } from '../../../core/components/AlertaGlobalModal';
 import { NotificacionesCampana } from '../../../core/components/NotificacionesCampana';
 import {
     obtenerUsuariosConRoles,
@@ -97,7 +98,7 @@ const obtenerBadgeRol = (rol?: string): { texto: string; icono: NombreIcono; col
     if (r === 'USUARIO') {
         return { texto: 'USUARIO', icono: 'user', color: '#16a34a', bg: '#dcfce7', border: '#bbf7d0' };
     }
-    return { texto: 'SIN ROL', icono: 'lock', color: '#64748b', bg: '#f1f5f9', border: '#e2e8f0' };
+    return { texto: 'USUARIO NO REGISTRADO', icono: 'lock', color: '#64748b', bg: '#f1f5f9', border: '#e2e8f0' };
 };
 
 const obtenerRolesDeUsuario = (item?: UsuarioRolItem | null): string[] => {
@@ -174,7 +175,7 @@ export const GestionRolesScreen = ({
             setTiposConOpciones(datos);
             setTipoOpcionSeleccionado((actual) => actual ?? datos[0]?.id ?? null);
         } catch (error) {
-            Alert.alert('Error', 'No se pudieron cargar las opciones de soporte.');
+            AppAlert.alert('Error', 'No se pudieron cargar las opciones de soporte.');
         }
     };
 
@@ -185,7 +186,7 @@ export const GestionRolesScreen = ({
             setNuevaOpcion('');
             await cargarTiposConOpciones();
         } catch (error: any) {
-            Alert.alert('No se pudo guardar', error?.response?.data?.message || 'Verifica que la opción no exista ya en esta categoría.');
+            AppAlert.alert('No se pudo guardar', error?.response?.data?.message || 'Verifica que la opción no exista ya en esta categoría.');
         }
     };
 
@@ -194,7 +195,7 @@ export const GestionRolesScreen = ({
             await cambiarEstadoOpcionTipoSoporte(id, estado);
             await cargarTiposConOpciones();
         } catch {
-            Alert.alert('Error', 'No se pudo actualizar el estado de la opción.');
+            AppAlert.alert('Error', 'No se pudo actualizar el estado de la opción.');
         }
     };
 
@@ -212,11 +213,7 @@ export const GestionRolesScreen = ({
     const [confirmandoQuitar, setConfirmandoQuitar] = useState<boolean>(false);
 
     const mostrarMensaje = (titulo: string, mensaje: string) => {
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-            window.alert(`${titulo}: ${mensaje}`);
-        } else {
-            Alert.alert(titulo, mensaje);
-        }
+        AppAlert.alert(titulo, mensaje);
     };
 
     const manejarCerrarSesion = async () => {
@@ -277,7 +274,8 @@ export const GestionRolesScreen = ({
         const user = (u.username || '').toLowerCase();
         const ci = (u.ci || '').toLowerCase();
         const email = (u.email || '').toLowerCase();
-        const rolesTexto = obtenerRolesDeUsuario(u).join(' ').toLowerCase() || (u.rol_soporte || '').toLowerCase();
+        const rolesArr = obtenerRolesDeUsuario(u);
+        const rolesTexto = rolesArr.length > 0 ? rolesArr.join(' ').toLowerCase() : 'sin rol no registrado';
         return (
             nombre.includes(termino) ||
             user.includes(termino) ||
@@ -391,7 +389,7 @@ export const GestionRolesScreen = ({
         const badges =
             rolesUsuario.length > 0
                 ? rolesUsuario.map((r) => obtenerBadgeRol(r))
-                : [obtenerBadgeRol('USUARIO')];
+                : [obtenerBadgeRol('SIN_ROL')];
         const esUsuarioActual =
             idAdminActual !== null && Number(item.id_usuario) === Number(idAdminActual);
 
@@ -461,7 +459,7 @@ export const GestionRolesScreen = ({
     };
 
     const rolesSeleccionado = obtenerRolesDeUsuario(usuarioSeleccionado);
-    const rolActualSeleccionado = rolesSeleccionado.length > 0 ? rolesSeleccionado.join(' + ') : 'SIN ROL';
+    const rolActualSeleccionado = rolesSeleccionado.length > 0 ? rolesSeleccionado.join(' + ') : 'USUARIO NO REGISTRADO';
     const tieneRolEspecial = rolesSeleccionado.length > 0;
     const esAutoEdicion =
         usuarioSeleccionado !== null &&

@@ -2,8 +2,8 @@ import axios from 'axios';
 import { Platform } from 'react-native';
 import { obtenerItem, eliminarItem } from '../utils/storage';
 
-const IP_LOCAL = '192.168.2.151';
-//const IP_LOCAL = '192.168.100.108';
+//const IP_LOCAL = '192.168.2.151';
+const IP_LOCAL = '192.168.100.108';
 
 const obtenerBaseUrl = () => {
     if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.hostname) {

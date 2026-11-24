@@ -3,11 +3,13 @@ import { StyleSheet } from 'react-native';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppNavigator } from './src/core/navigation/AppNavigator';
+import { AlertaGlobalModal } from './src/core/components/AlertaGlobalModal';
 
 export default function App() {
   return (
     <SafeAreaProvider>
       <AppNavigator />
+      <AlertaGlobalModal />
     </SafeAreaProvider>
   );
 }

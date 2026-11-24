@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class LoginDto {
   @IsNotEmpty({ message: 'El usuario o correo es obligatorio' })
@@ -8,4 +8,8 @@ export class LoginDto {
   @IsNotEmpty({ message: 'La contraseña es obligatoria' })
   @IsString()
   password: string;
+
+  @IsOptional()
+  @IsString()
+  plataforma?: string;
 }

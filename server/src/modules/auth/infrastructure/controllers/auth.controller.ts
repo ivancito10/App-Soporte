@@ -16,7 +16,7 @@ export class AuthController {
   @Public()
   @HttpCode(HttpStatus.OK)
   async login(@Body() dto: LoginDto) {
-    return await this.loginUseCase.ejecutar(dto);
+    return await this.loginUseCase.ejecutar(dto, dto.plataforma);
   }
 
   @Post('registrar-token')

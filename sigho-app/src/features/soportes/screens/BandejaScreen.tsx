@@ -10,7 +10,7 @@ import {
     TextInput,
     Modal,
     ScrollView,
-    Alert,
+    KeyboardAvoidingView,
     Image,
     Platform,
     useWindowDimensions,
@@ -24,6 +24,7 @@ import { TicketSoporte, RolBandeja } from '../types/soporte.types';
 import { CardTicket } from '../components/CardTicket';
 import { MenuLateralModal } from '../../../core/components/MenuLateralModal';
 import { AppIcon } from '../../../core/components/AppIcon';
+import { AppAlert } from '../../../core/components/AlertaGlobalModal';
 import { NotificacionesCampana } from '../../../core/components/NotificacionesCampana';
 
 export const BandejaScreen = ({ navigation, onLogout, rolActivo, rolesDisponibles = [], onCambiarRol, solicitudDesdeNotificacion, onNotificacionAbierta, onNotificacionSeleccionada }: any) => {
@@ -45,6 +46,7 @@ export const BandejaScreen = ({ navigation, onLogout, rolActivo, rolesDisponible
     const [errorSoporteManual, setErrorSoporteManual] = useState('');
     const [formSoporteManual, setFormSoporteManual] = useState({
         solicitante_nombre: '',
+        sede: '',
         oficina: '',
         piso: '',
         consultorio: '',
@@ -62,6 +64,7 @@ export const BandejaScreen = ({ navigation, onLogout, rolActivo, rolesDisponible
     const mapaInsistenciasRef = useRef<Record<number, number>>({});
     const primeraCargaRef = useRef<boolean>(true);
     const solicitudNotificacionProcesadaRef = useRef<number | null>(null);
+    const manualScrollRef = useRef<React.ElementRef<typeof ScrollView>>(null);
 
     useEffect(() => {
         if (!alertaEmergente) return;
@@ -176,32 +179,32 @@ export const BandejaScreen = ({ navigation, onLogout, rolActivo, rolesDisponible
     }, [cargarDatos]);
 
     const guardarSoporteManual = async () => {
-        if (!formSoporteManual.solicitante_nombre.trim() || !formSoporteManual.oficina.trim() || !formSoporteManual.descripcion.trim()) {
-            setErrorSoporteManual('Completa el nombre de quien solicitó el soporte, la oficina y el problema.');
+        const sedeLimpia = formSoporteManual.sede.trim();
+        const oficinaLimpia = formSoporteManual.oficina.trim();
+        if (!formSoporteManual.solicitante_nombre.trim() || !sedeLimpia || !formSoporteManual.descripcion.trim()) {
+            setErrorSoporteManual('Completa el nombre de quien solicitó, la sede y el problema.');
             return;
         }
+
+        const ubicacionCombinada = [sedeLimpia, oficinaLimpia].filter(Boolean).join(' - ').slice(0, 100);
 
         setGuardandoSoporteManual(true);
         setErrorSoporteManual('');
         try {
             await crearSoporteManual({
-                ...formSoporteManual,
                 solicitante_nombre: formSoporteManual.solicitante_nombre.trim(),
-                oficina: formSoporteManual.oficina.trim(),
+                oficina: ubicacionCombinada,
                 piso: formSoporteManual.piso.trim() || undefined,
                 consultorio: formSoporteManual.consultorio.trim() || undefined,
                 descripcion: formSoporteManual.descripcion.trim(),
+                prioridad: formSoporteManual.prioridad,
             });
             setModalSoporteManual(false);
-            setFormSoporteManual({ solicitante_nombre: '', oficina: '', piso: '', consultorio: '', descripcion: '', prioridad: 'MEDIA' });
+            setFormSoporteManual({ solicitante_nombre: '', sede: '', oficina: '', piso: '', consultorio: '', descripcion: '', prioridad: 'MEDIA' });
             setTabActivo('PENDIENTES');
             setFiltroKpi(null);
             await cargarDatos(true);
-            if (Platform.OS === 'web' && typeof window !== 'undefined') {
-                window.alert('El soporte manual quedó registrado y está en proceso.');
-            } else {
-                Alert.alert('Soporte registrado', 'El soporte quedó registrado y está en proceso.');
-            }
+            AppAlert.alert('Soporte registrado', 'El soporte quedó registrado y está en proceso.');
         } catch (error: any) {
             setErrorSoporteManual(error?.response?.data?.message || 'No se pudo registrar el soporte manual.');
         } finally {
@@ -596,10 +599,15 @@ export const BandejaScreen = ({ navigation, onLogout, rolActivo, rolesDisponible
             <Modal
                 visible={modalSoporteManual}
                 transparent
+                statusBarTranslucent
                 animationType="fade"
                 onRequestClose={() => setModalSoporteManual(false)}
             >
-                <View style={styles.manualModalBackdrop}>
+                <KeyboardAvoidingView
+                    style={styles.manualModalBackdrop}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 16}
+                >
                     <View style={styles.manualModal}>
                         <View style={styles.manualModalHeader}>
                             <View style={{ flex: 1 }}>
@@ -611,7 +619,13 @@ export const BandejaScreen = ({ navigation, onLogout, rolActivo, rolesDisponible
                             </TouchableOpacity>
                         </View>
 
-                        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                        <ScrollView
+                            ref={manualScrollRef}
+                            keyboardShouldPersistTaps="handled"
+                            keyboardDismissMode="on-drag"
+                            showsVerticalScrollIndicator={false}
+                            contentContainerStyle={{ paddingBottom: 20 }}
+                        >
                             <Text style={styles.manualFieldLabel}>Nombre de quien solicitó *</Text>
                             <TextInput
                                 style={styles.manualInput}
@@ -621,14 +635,28 @@ export const BandejaScreen = ({ navigation, onLogout, rolActivo, rolesDisponible
                                 maxLength={180}
                             />
 
-                            <Text style={styles.manualFieldLabel}>Oficina o sede *</Text>
-                            <TextInput
-                                style={styles.manualInput}
-                                value={formSoporteManual.oficina}
-                                onChangeText={(valor) => setFormSoporteManual((actual) => ({ ...actual, oficina: valor }))}
-                                placeholder="Ej. Plataforma"
-                                maxLength={100}
-                            />
+                            <View style={styles.manualFieldsRow}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.manualFieldLabel}>Sede *</Text>
+                                    <TextInput
+                                        style={styles.manualInput}
+                                        value={formSoporteManual.sede}
+                                        onChangeText={(valor) => setFormSoporteManual((actual) => ({ ...actual, sede: valor }))}
+                                        placeholder="Ej. Central"
+                                        maxLength={45}
+                                    />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.manualFieldLabel}>Oficina</Text>
+                                    <TextInput
+                                        style={styles.manualInput}
+                                        value={formSoporteManual.oficina}
+                                        onChangeText={(valor) => setFormSoporteManual((actual) => ({ ...actual, oficina: valor }))}
+                                        placeholder="Opcional"
+                                        maxLength={50}
+                                    />
+                                </View>
+                            </View>
 
                             <View style={styles.manualFieldsRow}>
                                 <View style={{ flex: 1 }}>
@@ -658,6 +686,11 @@ export const BandejaScreen = ({ navigation, onLogout, rolActivo, rolesDisponible
                                 style={[styles.manualInput, styles.manualDescriptionInput]}
                                 value={formSoporteManual.descripcion}
                                 onChangeText={(valor) => setFormSoporteManual((actual) => ({ ...actual, descripcion: valor }))}
+                                onFocus={() => {
+                                    setTimeout(() => {
+                                        manualScrollRef.current?.scrollToEnd({ animated: true });
+                                    }, 160);
+                                }}
                                 placeholder="Describe el problema y el trabajo realizado hasta ahora"
                                 multiline
                                 textAlignVertical="top"
@@ -705,7 +738,7 @@ export const BandejaScreen = ({ navigation, onLogout, rolActivo, rolesDisponible
                             </View>
                         </ScrollView>
                     </View>
-                </View>
+                </KeyboardAvoidingView>
             </Modal>
 
             {/* MENÚ LATERAL PARA CAMBIAR ENTRE ROLES */}

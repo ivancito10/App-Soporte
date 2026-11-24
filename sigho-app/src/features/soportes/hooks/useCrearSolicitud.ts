@@ -1,7 +1,7 @@
 // src/features/soportes/hooks/useCrearSolicitud.ts
 import { useState } from 'react';
-import { Alert, Platform } from 'react-native';
 import axios from 'axios';
+import { AppAlert } from '../../../core/components/AlertaGlobalModal';
 import { crearNuevaSolicitud, subirAdjuntoSolicitud } from '../api/soporte.service';
 import { CrearSolicitudPayload } from '../types/soporte.types';
 
@@ -26,8 +26,7 @@ export const useCrearSolicitud = () => {
                     await subirAdjuntoSolicitud(idSolicitud, adjuntoUri);
                 } catch (error: any) {
                     const mensaje = error?.response?.data?.message || 'La solicitud se creó, pero no se pudo subir la imagen.';
-                    if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(mensaje);
-                    else Alert.alert('Adjunto no cargado', mensaje);
+                    AppAlert.alert('Adjunto no cargado', mensaje);
                 }
             }
 
@@ -51,12 +50,8 @@ export const useCrearSolicitud = () => {
 
             setError(mensajeError);
 
-            // Lanzamos alerta compatible con Web y Móvil
-            if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
-                window.alert(`Error al solicitar soporte:\n${mensajeError}`);
-            } else {
-                Alert.alert('Error al solicitar soporte', mensajeError);
-            }
+            // Lanzamos alerta UI/UX institucional compatible con Web y Móvil
+            AppAlert.alert('Error al solicitar soporte', mensajeError);
 
             return null;
         } finally {
